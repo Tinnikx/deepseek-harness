@@ -2,6 +2,12 @@
 # repository-wide gate matrix.
 # Install: `node scripts/install-lefthook.mjs` (runs automatically via postinstall).
 
+# Pin the interpreter at the hook boundary: hooks inherit the PATH of whatever
+# invoked git, which for a GUI client is not a shell that read `.nvmrc`. The
+# `./` prefix is required: POSIX `.` resolves a slashless operand against PATH,
+# so a bare name is not found even though the generated hook runs at the root.
+rc: ./.lefthookrc
+
 pre-commit:
   jobs:
     - name: translation pairing (staged records)

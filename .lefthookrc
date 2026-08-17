@@ -1,0 +1,19 @@
+#!/bin/sh
+# Sourced by lefthook before every hook job (`rc` in lefthook.yml).
+#
+# Git hooks inherit the PATH of whatever invoked git. A GUI client, an editor,
+# or a shell whose version manager still points at an older default therefore
+# runs the hook jobs on a Node that predates `fs.globSync` and extensionless
+# ESM bin resolution — the scripts fail inside their own runner, with no
+# engines check to name the cause.
+#
+# Selecting the repository's `.nvmrc` version here fixes the interpreter at the
+# hook boundary instead. Every step is conditional: a contributor without nvm,
+# or one whose PATH already resolves a conforming Node, is left untouched.
+
+[ -n "$NVM_DIR" ] || NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] || return 0
+
+# nvm is a shell function, and its loader is verbose on some setups.
+. "$NVM_DIR/nvm.sh" --no-use >/dev/null 2>&1 || return 0
+nvm use >/dev/null 2>&1 || nvm use default >/dev/null 2>&1

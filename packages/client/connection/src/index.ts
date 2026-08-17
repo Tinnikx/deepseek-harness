@@ -46,6 +46,9 @@ function assertImageBodyCapacity(ctx: Context, maxRequestBodyBytes: number): voi
 /** Services required before providing Connection; API Proxy is an optional `/api` fallback. */
 export const inject = ['webServer']
 
+/** Which transport carries the downstream event streams to the client. */
+export type DownlinkTransport = 'websocket' | 'sse'
+
 /** Plugin config: the deployment's non-loopback serving authorities. */
 export interface ConnectionConfig {
   /**
@@ -59,11 +62,20 @@ export interface ConnectionConfig {
   trustedHosts?: string[]
   /** Maximum buffered JSON body for every `/api` request. */
   maxRequestBodyBytes?: number
+  /**
+   * How `/api/events/*` reaches the client. `websocket` is the browser
+   * carrier's transport: the GET is refused with 426 and the stream arrives
+   * over an upgraded socket. `sse` serves the same frames as a streaming GET
+   * and registers no upgrade route — the shape a carrier without HTTP upgrade
+   * requires, such as [electron-carrier](../../host/electron-carrier/README.md).
+   */
+  downlink?: DownlinkTransport
 }
 
 export const Config: z<ConnectionConfig> = z.object({
   trustedHosts: z.array(String).default([]),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
+  downlink: z.union([z.const('websocket'), z.const('sse')]).default('websocket'),
 })
 
 /**
@@ -131,6 +143,7 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []
   const maxRequestBodyBytes = config?.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES
+  const downlink = config?.downlink ?? 'websocket'
   // Config boundary: a malformed entry fails the load loudly here rather than
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
@@ -147,7 +160,12 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         && !isTrustedApiRequest(request, [])) {
         return new Response('forbidden', { status: 403 })
       }
-      if (request.method === 'GET' && (pathname === MUX_EVENTS_PATH || pathname === HOST_EVENTS_PATH)) {
+      // Under `websocket` the event GET is refused so the client upgrades
+      // instead; under `sse` it falls through to the gateway, whose GET
+      // branches serve the same frames as a streaming response.
+      if (downlink === 'websocket'
+        && request.method === 'GET'
+        && (pathname === MUX_EVENTS_PATH || pathname === HOST_EVENTS_PATH)) {
         return new Response('upgrade required', {
           status: 426,
           headers: { connection: 'Upgrade', upgrade: 'websocket' },
@@ -171,6 +189,11 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
     },
   }
   ctx.effect(() => ctx.webServer.register(route), 'client-connection: /api route')
+  // Under `sse` the frames already left through the /api route above, so no
+  // upgrade route is registered at all — a carrier without HTTP upgrade would
+  // hold the registration inert, and an upgrade-capable one must not offer a
+  // second, unused path to the same streams.
+  if (downlink === 'sse') return
   ctx.inject(['apiProxy'], (apiCtx) => {
     assertImageBodyCapacity(apiCtx, maxRequestBodyBytes)
     const downlinks = new WebSocketDownlinks(apiCtx.apiProxy)

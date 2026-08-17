@@ -158,6 +158,7 @@ export const TRANSLATION_SCOPE_GLOB_EXCLUDES = [
   '**/dist-exe/**',
   '**/__pycache__/**',
   '**/.pytest_cache/**',
+  'dist/**',
   'apps/web/dist/**',
   '.artifacts/**',
   'python/sdk-runtime/src/deepseek_harness_runtime/runtime/dsh-jsonrpc-agent-*/**',
@@ -165,12 +166,19 @@ export const TRANSLATION_SCOPE_GLOB_EXCLUDES = [
   'vendor/**',
 ]
 
-/** Whether a repository-relative path belongs to a dependency or generated tree. */
+/**
+ * Whether a repository-relative path belongs to a dependency or generated tree.
+ *
+ * The repository-root `dist/` and `apps/web/dist/` are anchored rather than
+ * matched as a path segment, because `dist` is an ordinary directory name a
+ * future source subtree may carry.
+ */
 function isTranslationSourceExcluded(file: string): boolean {
   const segments = file.split('/')
   return segments.some(segment => NON_SOURCE_DIRECTORIES.has(segment)
       || segment.startsWith('.doc-typecheck-')
     || segment.startsWith('.node-next-types-'))
+    || file.startsWith('dist/')
     || file.startsWith('apps/web/dist/')
     || file.startsWith('python/sdk-runtime/src/deepseek_harness_runtime/runtime/dsh-jsonrpc-agent-')
     || file.startsWith('python/sdk-runtime/src/deepseek_harness_runtime/runtime/node/')

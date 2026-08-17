@@ -7,6 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { HostDescription, IApiClient } from './api.ts'
 import { ConnectionController, type ConnectionConfig, type ConnectionSinks, type ConnectionState } from './connection.ts'
 import { FixtureApiClient } from './fixture.ts'
+import { SseApiClient } from './sse-api-client.ts'
 import { WebApiClient } from './web-api-client.ts'
 import { createWebConnectionRpc } from './rpc.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
@@ -78,6 +79,18 @@ export interface ConnectionHandle {
 }
 
 /**
+ * Whether the page is served over a custom scheme. Only an http(s) origin
+ * yields a `ws:`/`wss:` URL, so a page on any other scheme — the Electron
+ * carrier's — has no WebSocket. An environment that reports no protocol at all
+ * is treated as http(s): the browser carrier is the default, and this switch
+ * only moves a page that positively identifies as something else.
+ */
+function isCustomSchemePage(pageLocation: Location | undefined): boolean {
+  const protocol = pageLocation?.protocol
+  return protocol !== undefined && protocol !== 'http:' && protocol !== 'https:'
+}
+
+/**
  * Client plugin body: pick the api by page mode and provide ctx.connection.
  * @param ctx - client cordis context.
  */
@@ -85,7 +98,11 @@ export function apply(ctx: Context): void {
   const pageLocation = typeof location === 'undefined' ? undefined : location
   const fixture = pageLocation !== undefined && new URLSearchParams(pageLocation.search).has('fixture')
   const fixtureClient = fixture ? new FixtureApiClient() : undefined
-  const api: IApiClient = fixtureClient ?? new WebApiClient()
+  // A custom-scheme page (the Electron carrier) has no WebSocket, so its
+  // streams arrive as SSE; the host half of this plugin must be mounted with
+  // the matching `downlink: sse`.
+  const httpClient = isCustomSchemePage(pageLocation) ? new SseApiClient() : new WebApiClient()
+  const api: IApiClient = fixtureClient ?? httpClient
   const rpc = fixtureClient?.rpc ?? createWebConnectionRpc()
   let started = false
   let description: HostDescription | undefined

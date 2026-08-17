@@ -10,7 +10,7 @@ import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { RpcId, type ClientRequest } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { WebServer, WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
-import { API_PATH, apply, HOST_EVENTS_PATH, inject, MUX_EVENTS_PATH, type HostConnectionHandle } from '../src/index.ts'
+import { API_PATH, apply, HOST_EVENTS_PATH, inject, MUX_EVENTS_PATH, type ConnectionConfig, type HostConnectionHandle } from '../src/index.ts'
 
 /** Structural webServer fake recording both route registries. */
 function fakeHttpServer(
@@ -56,12 +56,19 @@ function fakeRawPost(headers: Record<string, string>, url: string, body: string)
 }
 
 /** Response recorder compatible with both the fence's short-circuit and the bridge. */
-function fakeResponse(): { response: ServerResponse; state: { status?: number; body?: unknown } } {
-  const state: { status?: number; body?: unknown } = {}
+function fakeResponse(): {
+  response: ServerResponse
+  state: { status?: number; headers?: Record<string, string>; body?: unknown }
+} {
+  const state: { status?: number; headers?: Record<string, string>; body?: unknown } = {}
   const chunks: Buffer[] = []
   const response = Object.assign(new EventEmitter(), {
     writableEnded: false,
-    writeHead(value: number) { state.status = value; return this },
+    writeHead(value: number, headers?: Record<string, string>) {
+      state.status = value
+      if (headers !== undefined) state.headers = headers
+      return this
+    },
     write(value: string | Uint8Array) { chunks.push(Buffer.from(value)); return true },
     end(this: { writableEnded: boolean }, value?: unknown) {
       if (typeof value === 'string' || value instanceof Uint8Array) chunks.push(Buffer.from(value))
@@ -74,7 +81,7 @@ function fakeResponse(): { response: ServerResponse; state: { status?: number; b
   return { response, state }
 }
 
-async function mounted(config?: { trustedHosts?: string[] }): Promise<{
+async function mounted(config?: ConnectionConfig, apiProxy?: ApiProxy): Promise<{
   routes: WebRoute[]
   upgrades: WebUpgradeRoute[]
   dispose: () => Promise<void>
@@ -83,7 +90,7 @@ async function mounted(config?: { trustedHosts?: string[] }): Promise<{
   const routes: WebRoute[] = []
   const upgrades: WebUpgradeRoute[] = []
   ctx.provide('webServer', fakeHttpServer(routes, upgrades) as WebServer)
-  ctx.provide('apiProxy', {} as unknown as ApiProxy)
+  ctx.provide('apiProxy', apiProxy ?? ({} as unknown as ApiProxy))
   const fiber = ctx.plugin({ inject: [...inject], apply }, config)
   await fiber.await()
   return { routes, upgrades, dispose: () => fiber.dispose() }
@@ -134,6 +141,31 @@ describe('connection node half', () => {
       expect(state.body).toBe('upgrade required')
     }
     await dispose()
+  })
+
+  it('serves both event paths as SSE and registers no upgrade route under downlink: sse', async () => {
+    // A carrier without HTTP upgrade (electron-carrier) mounts this shape: the
+    // same frames leave through the /api route as a streaming GET.
+    const streams: string[] = []
+    const eventStream = (name: string) => async function* () {
+      streams.push(name)
+      yield { rpcId: RpcId(`frame-${name}`), payload: { type: 'session/subscribed', sessionId: 'session-1', lastSeq: 0 } }
+    }
+    const apiProxy = {
+      events: { mux: eventStream('mux'), host: eventStream('host') },
+    } as unknown as ApiProxy
+    const { routes, upgrades, dispose } = await mounted({ downlink: 'sse' }, apiProxy)
+    expect(upgrades).toHaveLength(0)
+    for (const path of [MUX_EVENTS_PATH, HOST_EVENTS_PATH]) {
+      const { response, state } = fakeResponse()
+      await routes[0]!.handler(fakeRequest({ host: '127.0.0.1:3080' }, path), response)
+      expect(state.status).toBe(200)
+      expect(state.headers?.['content-type']).toBe('text/event-stream')
+      expect(String(state.body)).toContain('"type":"session/subscribed"')
+    }
+    expect(streams).toEqual(['mux', 'host'])
+    await dispose()
+    expect(routes).toHaveLength(0)
   })
 
   it('rejects an untrusted WebSocket upgrade before protocol negotiation', async () => {

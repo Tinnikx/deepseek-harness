@@ -3,6 +3,47 @@ import { isNonNullable, type Dict } from '@deepseek-ai/cosmokit'
 import { Entry, type EntryOptions } from './entry.ts'
 import { EntryGroup } from './group.ts'
 
+/**
+ * Resolve a bare plugin specifier against the config file's directory without
+ * Node's internal module loader.
+ *
+ * The internal loader is the only API that takes an arbitrary parent URL, so
+ * an embedder that does not expose it (Electron) leaves a plain `import(name)`
+ * anchored on this module's own location — the loader package's own
+ * `node_modules`, which under an isolated install contains none of the
+ * configured plugins. `createRequire(baseUrl)` restores the documented anchor.
+ *
+ * It reads `exports` under the `require` condition, so a package shipping a
+ * separate CommonJS build loads that build here. Anything it cannot resolve to
+ * an absolute path — a builtin, or a name only reachable through ESM-only
+ * conditions — falls back to the bare specifier so Node reports its own
+ * resolution failure.
+ *
+ * The `node:` modules are imported here rather than at module scope because
+ * this file is also bundled for the browser, where a static builtin import
+ * fails the bundle even though only a Node host reaches this function.
+ * @param name - Bare specifier from an entry's `name`.
+ * @param baseUrl - Directory URL of the config file that declared the entry.
+ * @returns a `file:` URL when resolution succeeded, otherwise `name` unchanged.
+ */
+async function resolveFromBase(name: string, baseUrl: string | undefined): Promise<string> {
+  if (!baseUrl) return name
+  const [{ createRequire }, { isAbsolute }, { pathToFileURL }] = await Promise.all([
+    import('node:module'),
+    import('node:path'),
+    import('node:url'),
+  ])
+  let filename: string
+  try {
+    filename = createRequire(baseUrl).resolve(name)
+  } catch {
+    // Unresolvable here; the import below reports the failure with Node's own
+    // message and specifier, which is what a config author needs to see.
+    return name
+  }
+  return isAbsolute(filename) ? pathToFileURL(filename).href : name
+}
+
 /** Mutable tree of loader entries. Persistence is supplied by subclasses. */
 export abstract class EntryTree {
   static readonly sep = ':'
@@ -156,7 +197,7 @@ export abstract class EntryTree {
       } else if (name.startsWith('.')) {
         return await import(/* @vite-ignore */new URL(name, this.ctx.baseUrl).href)
       } else {
-        return await import(/* @vite-ignore */name)
+        return await import(/* @vite-ignore */await resolveFromBase(name, this.ctx.baseUrl))
       }
     }, getOuterStack)
   }

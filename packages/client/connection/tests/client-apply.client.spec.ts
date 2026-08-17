@@ -8,9 +8,10 @@ import { apply, type ConnectionHandle } from '../src/client/index.ts'
 import type { RpcMessage } from '../src/client/api.ts'
 import { RpcId } from '../src/client/api.ts'
 import { FixtureApiClient } from '../src/client/fixture.ts'
+import { SseApiClient } from '../src/client/sse-api-client.ts'
 import { WebApiClient } from '../src/client/web-api-client.ts'
 
-type Win = { location?: { hostname: string; search: string; origin?: string } }
+type Win = { location?: { hostname: string; search: string; origin?: string; protocol?: string } }
 type WebSocketGlobal = { WebSocket?: typeof WebSocket }
 
 const originalWebSocket = globalThis.WebSocket
@@ -82,6 +83,20 @@ describe('connection client apply', () => {
   it('reports non-loopback page authority through the connection handle', async () => {
     ;(globalThis as Win).location = { hostname: '192.0.2.20', search: '' }
     expect((await mount()).isLoopback).toBe(false)
+  })
+
+  it('selects the SSE client for a custom-scheme page and keeps WebSocket for every http(s) one', async () => {
+    // A custom scheme (the Electron carrier's) yields no ws:/wss: URL, so its
+    // page reads the downstream streams as SSE instead.
+    ;(globalThis as Win).location = { hostname: '127.0.0.1', search: '', protocol: 'dsh:' }
+    expect((await mount()).api).toBeInstanceOf(SseApiClient)
+    for (const protocol of ['http:', 'https:']) {
+      ;(globalThis as Win).location = { hostname: 'harness.example', search: '', protocol }
+      expect((await mount()).api).toBeInstanceOf(WebApiClient)
+    }
+    // ?fixture still wins: the page mode is decided before the transport.
+    ;(globalThis as Win).location = { hostname: '127.0.0.1', search: '?fixture', protocol: 'dsh:' }
+    expect((await mount()).api).toBeInstanceOf(FixtureApiClient)
   })
 
   it('start() hands out one loop, rejects a second consumer, and stop() aborts the streams', async () => {
