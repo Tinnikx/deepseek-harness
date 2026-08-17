@@ -7,6 +7,7 @@
  * @module @deepseek-ai/dsh-desktop/window
  */
 
+import { fileURLToPath } from 'node:url'
 import { BrowserWindow, shell } from 'electron'
 import { DESKTOP_ENTRY_URL } from './scheme.ts'
 
@@ -15,6 +16,18 @@ const WINDOW_SIZE = { width: 1280, height: 800, minWidth: 680, minHeight: 480 }
 
 /** Painted before the first frame arrives so the window never flashes white over a dark theme. */
 const BACKGROUND_COLOR = '#1f1f1f'
+
+/**
+ * The window icon the desktop environment shows in its task bar, dock, and
+ * window switcher: the frontend's hero mark (`FishLogo`) rendered at 512px in
+ * the brand ink over transparency, so it reads on both light and dark shells.
+ *
+ * Resolved from this module rather than the process cwd, and identical from
+ * `src/window.ts` and the bundled `lib/main.js` — both sit one level under the
+ * package root that holds `assets/`. Windows and Linux read it; macOS takes
+ * its icon from the application bundle instead and ignores this.
+ */
+const ICON_PATH = fileURLToPath(new URL('../assets/icon.png', import.meta.url))
 
 /**
  * Create the application window and load the surface.
@@ -29,6 +42,7 @@ export function createDesktopWindow(): BrowserWindow {
     ...WINDOW_SIZE,
     show: false,
     backgroundColor: BACKGROUND_COLOR,
+    icon: ICON_PATH,
     // The menu bar carries nothing this application defines; Alt still reveals
     // Electron's default roles for the few a user expects (copy, devtools).
     autoHideMenuBar: true,

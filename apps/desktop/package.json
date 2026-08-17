@@ -12,6 +12,7 @@
   "main": "lib/main.js",
   "license": "MIT",
   "files": [
+    "assets",
     "lib"
   ],
   "dependencies": {

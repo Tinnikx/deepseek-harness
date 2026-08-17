@@ -12,6 +12,8 @@ The dsh desktop application: an Electron shell around the same frontend the brow
 
 The window carries no Node capability: `contextIsolation` and `sandbox` are on, `nodeIntegration` is off, and there is no preload script. The page reaches the harness only through the custom scheme, exactly as a browser tab reaches it only through the HTTP carrier.
 
+The window's icon is [`assets/icon.png`](assets/icon.png) — the frontend's hero mark (`FishLogo`) rendered at 512px in brand blue over transparency, so it reads on both light and dark shells. `window.ts` resolves it relative to its own module, which lands on the same file from `src/` and from the bundled `lib/main.js`; `package.json` lists `assets` in `files` so the deployed closure carries it. This is what Linux desktop environments and Windows show in the task bar, dock, and window switcher. macOS reads the application bundle instead and ignores it.
+
 ## Zero ports
 
 Requests on a custom scheme are routed inside Chromium and never touch the network stack, so the application listens on nothing. `ss -tlnp` shows no socket for the process. The loopback authority in the URL is not a bind address — it is the value the carrier synthesizes into the `Host` header that the `/api` trust fence reads, which is why it must stay loopback: a different authority would make every privileged RPC (settings, credentials) answer 403.
