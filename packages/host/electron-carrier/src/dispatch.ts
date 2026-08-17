@@ -19,12 +19,16 @@ function asError(value: unknown): Error {
 /**
  * Serve one custom-protocol request.
  *
- * Dispatch completes as soon as the handler fixes its status and headers, not
- * when the handler returns: an SSE route keeps its response open indefinitely,
- * and Chromium needs the `Response` before the first byte can flow. A handler
- * that finishes without ever responding, or that throws before responding, is
- * a defect in that route rather than a client error, so it answers 500 and
- * reports.
+ * Dispatch completes when the handler fixes its status and headers, not when
+ * the handler returns. A `node:http` handler signals its response through the
+ * response object alone: returning void while a file read, a database call, or
+ * a timer completes later is ordinary, and an SSE route never returns at all.
+ * Waiting on the return value would discard those responses. A handler that
+ * neither responds nor throws therefore leaves the request open, exactly as it
+ * would on a real HTTP server.
+ *
+ * A throw before responding is the one failure the handler cannot report
+ * through the response, so it answers 500 and reports.
  *
  * @param request - the request Chromium routed to the scheme.
  * @param table - the carrier's registrations.
@@ -48,7 +52,7 @@ export async function dispatch(request: Request, table: WebRouteTable, onError: 
   const req = toIncomingMessage(request)
   const res = createServerResponse()
 
-  const finished = (async () => {
+  void (async () => {
     try {
       await handler(req, res)
     } catch (error) {
@@ -56,15 +60,7 @@ export async function dispatch(request: Request, table: WebRouteTable, onError: 
       if (!res.headersSent) res.writeHead(500)
       if (!res.writableEnded) res.destroy()
     }
-    return 'returned' as const
   })()
 
-  const first = await Promise.race([res.headersReady.then(() => 'responded' as const), finished])
-  if (first === 'returned' && !res.headersSent) {
-    onError(new Error(`electron-carrier: route "${pathname}" returned without responding`))
-    res.writeHead(500)
-    res.end()
-  }
-  await res.headersReady
-  return res.toResponse()
+  return res.headersReady.then(() => res.toResponse())
 }

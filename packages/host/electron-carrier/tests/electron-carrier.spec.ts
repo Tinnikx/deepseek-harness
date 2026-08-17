@@ -223,10 +223,25 @@ describe('electron carrier', () => {
     expect((await app.fetch('/boom')).status).toBe(500)
   })
 
-  it('answers 500 when a handler returns without responding', async () => {
+  it('serves a handler that responds after returning void', async () => {
     const app = await loadComposition()
-    app.ctx.webServer.register({ kind: 'exact', path: '/silent', handler: () => {} })
-    expect((await app.fetch('/silent')).status).toBe(500)
+    // The node:http shape a static-asset route uses: the handler returns as
+    // soon as the read is scheduled and writes from its callback. Nothing in
+    // its return value marks the response as pending.
+    app.ctx.webServer.register({
+      kind: 'exact',
+      path: '/late',
+      handler: (_req, res) => {
+        setTimeout(() => {
+          res.writeHead(200, { 'content-type': 'image/webp' })
+          res.end(Buffer.from([0x52, 0x49, 0x46, 0x46]))
+        }, 5)
+      },
+    })
+    const response = await app.fetch('/late')
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('image/webp')
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([0x52, 0x49, 0x46, 0x46]))
   })
 
   it('refuses duplicate registrations and a second fallback', async () => {
