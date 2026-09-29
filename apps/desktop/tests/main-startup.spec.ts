@@ -3,7 +3,7 @@ import { WINDOWS_TITLEBAR_HEIGHT } from '../src/windows-layout.ts'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import type { MenuItemConstructorOptions, MessageBoxOptions } from 'electron'
 import { DESKTOP_IPC, type DesktopUpdateState } from '../src/ipc.ts'
@@ -2206,6 +2206,39 @@ describe('desktop main startup', () => {
     expect(window.contentView.removeChildView).toHaveBeenCalledWith(cover)
     expect(window.contentView.removeChildView.mock.invocationCallOrder[0]!)
       .toBeLessThan(harness.dialog.showMessageBox.mock.invocationCallOrder[0]!)
+  })
+
+  it('draws the Linux boot cover with the theme cached by the previous run', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    writeFileSync(join(harness.app.getPath('userData'), 'theme-source'), 'dark')
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const window = harness.windows[0]!
+    const cover = harness.coverViews[0]!
+    expect(window.setBackgroundColor).toHaveBeenCalledWith('#12081f')
+    expect(cover.setBackgroundColor).toHaveBeenCalledWith('#12081f')
+  })
+
+  it('caches the theme source the Linux page applies for the next launch', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const window = harness.windows[0]!
+    const apply = harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.nativeThemeSet)![1]
+    apply({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, 'dark')
+    expect(harness.nativeTheme.themeSource).toBe('dark')
+    expect(readFileSync(join(harness.app.getPath('userData'), 'theme-source'), 'utf8')).toBe('dark')
+  })
+
+  it('keeps the theme cache Linux-only', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'win32', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const window = harness.windows[0]!
+    const apply = harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.nativeThemeSet)![1]
+    apply({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, 'dark')
+    expect(harness.nativeTheme.themeSource).toBe('dark')
+    expect(existsSync(join(harness.app.getPath('userData'), 'theme-source'))).toBe(false)
   })
 
   it('prepares an independent plugin profile for the unpackaged Host', async () => {

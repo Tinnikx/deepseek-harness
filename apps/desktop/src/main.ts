@@ -32,7 +32,8 @@ import { installDesktopDirectoryPicker } from './directory-picker.ts'
 import { installMicrophonePermissions } from './microphone-permissions.ts'
 import { DesktopBackendController } from './backend-controller.ts'
 import { BOOT_COVER_MIN_VISIBLE_MS, raiseBootCover, waitUntilPageSettled, type BootCover } from './boot-cover.ts'
-import { resolveBootPalette } from './boot-cover-document.ts'
+import { bootCoverIsDark, resolveBootPalette } from './boot-cover-document.ts'
+import { readCachedThemeSource, writeCachedThemeSource } from './theme-source-cache.ts'
 import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
 import { readDeviceInfo } from './device-info.ts'
 import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
@@ -743,9 +744,16 @@ async function main(): Promise<void> {
   })
   ipcMain.handle(PLATFORM_IPC.close, (event) => { assertMainApplication(event); platformView.close() })
   // Only the main window may synchronize its palette with the native material.
+  // The Linux boot cover resolves its palette at window creation, before the
+  // page's durable theme preference can reach the shell, so the applied source
+  // is cached in userData for the next launch.
+  const themeSourcePath = join(app.getPath('userData'), 'theme-source')
   ipcMain.on(DESKTOP_IPC.nativeThemeSet, (event, source: unknown) => {
     if (mainWindow === undefined || event.sender !== mainWindow.webContents) return
-    if (source === 'light' || source === 'dark' || source === 'system') nativeTheme.themeSource = source
+    if (source === 'light' || source === 'dark' || source === 'system') {
+      nativeTheme.themeSource = source
+      if (process.platform === 'linux') writeCachedThemeSource(themeSourcePath, source)
+    }
   })
   ipcMain.handle(DESKTOP_IPC.localeBootstrap, async (event) => {
     if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame
@@ -1094,7 +1102,7 @@ async function main(): Promise<void> {
       // The window appears as soon as the opaque boot cover has drawn, so the
       // launch shows the animated cover from the first moment instead of an
       // empty desktop until the Host is ready.
-      const palette = resolveBootPalette(nativeTheme.shouldUseDarkColors)
+      const palette = resolveBootPalette(bootCoverIsDark(readCachedThemeSource(themeSourcePath), nativeTheme.shouldUseDarkColors))
       window.setBackgroundColor(palette.background)
       const show = (): void => {
         if (!window.isDestroyed() && !window.isVisible()) window.show()
