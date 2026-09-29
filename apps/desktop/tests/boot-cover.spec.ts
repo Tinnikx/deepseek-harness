@@ -61,7 +61,7 @@ afterEach(() => { vi.useRealTimers() })
 describe('raiseBootCover', () => {
   it('attaches an opaque cover sized to the content box and reports its first frame', () => {
     const { owner, view, painted } = cover()
-    expect(view.setBackgroundColor).toHaveBeenCalledWith('#151517')
+    expect(view.setBackgroundColor).toHaveBeenCalledWith('#12081f')
     expect(owner.addChildView).toHaveBeenCalledWith(view)
     expect(view.bounds).toEqual({ x: 0, y: 0, width: 900, height: 650 })
     expect(view.webContents.urls[0]!.startsWith('data:text/html;charset=utf-8,')).toBe(true)
