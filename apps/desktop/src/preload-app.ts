@@ -2,6 +2,7 @@
 
 import type { DesktopShortcutInput, ShortcutConfigSnapshot, ShortcutSaveResult } from '@deepseek-ai/dsh-client-shortcuts/protocol'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { SETTLED_FLAG } from './boot-cover-document.ts'
 import { DESKTOP_IPC, SCHEME, type DshDesktopProductApi, type DesktopUpdatePresentation } from './ipc.ts'
 import { PLATFORM_IPC } from './platform-ipc.ts'
 import { markDocumentPlatform, syncWindowFullscreen } from './preload-platform.ts'
@@ -58,7 +59,48 @@ function createProductApi(): DshDesktopProductApi {
   }
 }
 
+/**
+ * The custom property `@deepseek-ai/dsh-client-ui-theme` paints the body from;
+ * an empty computed value means its stylesheets have not arrived.
+ */
+const THEME_VARIABLE = '--dsw-alias-bg-base'
+
+/** How long the background must hold one value, once themed, before the page counts as settled. */
+const SETTLED_MS = 400
+
+/** Sampling period; a timer rather than `requestAnimationFrame` because a cover-occluded page stops producing frames. */
+const SAMPLE_MS = 50
+
+/**
+ * Watch the document background until the delivered theme holds, then raise
+ * the settled flag once, so the main process lifts the Linux boot cover
+ * (see [boot-cover](./boot-cover.ts)) over a themed page instead of a flash.
+ * The theme lands in two steps — the light value with the stylesheets, the
+ * dark one with a `body` attribute — so the hold covers the gap between them.
+ */
+function publishWhenThemeSettled(): void {
+  let held = ''
+  let heldSince = performance.now()
+  const sample = (): void => {
+    // A preload runs before the document is parsed, so there may be no body
+    // to take a computed style from yet.
+    if (document.readyState === 'loading') return
+    const style = getComputedStyle(document.body)
+    const themed = style.getPropertyValue(THEME_VARIABLE).trim() !== ''
+    if (style.backgroundColor !== held) {
+      held = style.backgroundColor
+      heldSince = performance.now()
+    }
+    if (themed && performance.now() - heldSince >= SETTLED_MS) {
+      document.documentElement.dataset[SETTLED_FLAG] = '1'
+      clearInterval(timer)
+    }
+  }
+  const timer = setInterval(sample, SAMPLE_MS)
+}
+
 if (location.protocol === `${SCHEME}:` && location.hostname === 'app') {
+  if (process.platform === 'linux' && process.isMainFrame) publishWhenThemeSettled()
   contextBridge.exposeInMainWorld('dshOnboarding', {
     hasApiKey: () => ipcRenderer.invoke(DESKTOP_IPC.onboardingApiKey) as Promise<boolean>,
     setActive: (active: boolean) => { ipcRenderer.send(DESKTOP_IPC.onboardingActive, active) },

@@ -4,7 +4,7 @@ Status: implemented
 
 [English](2026-09-09-desktop-immediate-window-and-direct-start.md) | 中文
 
-插件管理和原生恢复遵循[共享 Web 薄壳决策](2026-09-10-desktop-web-wrapper.zh.md)。
+插件管理和原生恢复遵循[共享 Web 薄壳决策](2026-09-10-desktop-web-wrapper.zh.md)。Linux 上的窗口时机现已改由[动画开屏盖层决策](2026-09-29-desktop-linux-boot-cover.zh.md)管辖，本记录在该平台被其部分取代；macOS 与 Windows 仍按下文的时机执行。
 
 ## 问题
 

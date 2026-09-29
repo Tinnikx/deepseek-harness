@@ -70,12 +70,19 @@ vi.mock('electron', () => ({
     constructor(options: BrowserWindowConstructorOptions) { state.windowOptions = options }
     private ready: (() => void) | undefined
     webContents = { mainFrame: { url: 'dsh-app://app/' }, setWindowOpenHandler: vi.fn(),
-      on: vi.fn(), once: vi.fn(), send: vi.fn(), openDevTools: state.openDevTools }
+      on: vi.fn(), once: vi.fn(), off: vi.fn(), send: vi.fn(), openDevTools: state.openDevTools,
+      isDestroyed: () => false, executeJavaScript: vi.fn(async () => false) }
+    // Linux boots behind the animated cover, which needs a host surface.
+    contentView = { addChildView: vi.fn(), removeChildView: vi.fn() }
+    getContentBounds = () => ({ x: 0, y: 0, width: 900, height: 650 })
+    setBackgroundColor = vi.fn()
     static getAllWindows() { return [] }
     once(name: string, callback: () => void) { if (name === 'ready-to-show') this.ready = callback; return this }
     on() { return this }
+    off = vi.fn()
     isDestroyed() { return false }
     isMinimized() { return false }
+    isVisible = () => false
     restore = vi.fn()
     focus = state.focusWorkspace
     moveTop = state.moveTopWorkspace
@@ -83,6 +90,12 @@ vi.mock('electron', () => ({
     show = state.showWorkspace
     showInactive = state.showInactiveWorkspace
     async loadURL(url: string) { state.contents = this.webContents; await state.loadWorkspace(url); this.ready?.() }
+  },
+  WebContentsView: class {
+    webContents = { once: vi.fn(), on: vi.fn(), off: vi.fn(), isDestroyed: () => false,
+      close: vi.fn(), loadURL: vi.fn(async () => {}), executeJavaScript: vi.fn(async () => undefined) }
+    setBackgroundColor = vi.fn()
+    setBounds = vi.fn()
   },
   net: { fetch: vi.fn() },
   nativeTheme: state.nativeTheme,

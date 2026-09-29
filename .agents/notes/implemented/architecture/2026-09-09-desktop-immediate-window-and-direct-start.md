@@ -4,7 +4,7 @@ Status: implemented
 
 English | [中文](2026-09-09-desktop-immediate-window-and-direct-start.zh.md)
 
-Plugin management and native recovery follow the [shared Web wrapper decision](2026-09-10-desktop-web-wrapper.md).
+Plugin management and native recovery follow the [shared Web wrapper decision](2026-09-10-desktop-web-wrapper.md). On Linux, window timing now follows [the animated boot cover decision](2026-09-29-desktop-linux-boot-cover.md), which partially supersedes this record there; macOS and Windows keep the timing described below.
 
 ## Problem
 
@@ -14,7 +14,7 @@ Waiting for backend readiness leaves users without a window during profile prepa
 
 Electron creates the main window with the packaged Web loading page before profile reconciliation or Host startup. The Web entry draws its boot page before awaiting Host readiness. The owned preload delivers structured boot injections, and the existing document activates its client plugins after they are applied; startup failures display diagnostics and available recovery actions. Closing during loading cancels further startup work and waits for the pending child to exit.
 
-Fatal presentation follows [native Desktop recovery](2026-09-15-desktop-native-fatal-recovery.md). Window timing, direct Host startup, and shutdown ownership remain governed here.
+Fatal presentation follows [native Desktop recovery](2026-09-15-desktop-native-fatal-recovery.md). Window timing on macOS and Windows, direct Host startup, and shutdown ownership remain governed here.
 
 Desktop starts the actual Host through the [shared Web runner](2026-09-10-desktop-web-wrapper.md) after preparing the profile in place. Readiness supplies the authenticated Host URL and boot injections. The shell exchanges the URL for a Host cookie, forwards application HTTP requests, and authenticates direct WebSocket requests only for the owned application origin. This carrier adaptation preserves Web route and stream semantics while allowing static HTML to appear before the Host.
 

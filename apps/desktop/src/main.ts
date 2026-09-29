@@ -31,6 +31,8 @@ import { desktopReportedPlatform } from './desktop-platform.ts'
 import { installDesktopDirectoryPicker } from './directory-picker.ts'
 import { installMicrophonePermissions } from './microphone-permissions.ts'
 import { DesktopBackendController } from './backend-controller.ts'
+import { BOOT_COVER_MIN_VISIBLE_MS, raiseBootCover, waitUntilPageSettled, type BootCover } from './boot-cover.ts'
+import { resolveBootPalette } from './boot-cover-document.ts'
 import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
 import { readDeviceInfo } from './device-info.ts'
 import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
@@ -242,6 +244,10 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
       webSecurity: true,
       webviewTag: primary,
       devTools: true,
+      // On Linux the boot cover occludes the application page, which marks the
+      // page hidden and throttles its timers; the cover-lift sampler must keep
+      // running at full rate underneath.
+      ...(process.platform === 'linux' ? { backgroundThrottling: false } : {}),
     },
   })
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -424,6 +430,11 @@ async function main(): Promise<void> {
   }
   const platformView = new DesktopPlatformView(join(app.getAppPath(), 'lib', 'preload-platform-account.cjs'),
     () => locale.id === 'zh-CN' ? 'zh_CN' : 'en_US', desktopReportedPlatform(process.platform) ?? null)
+  // One cover per primary window; a recreated window raises its own.
+  const bootCovers = new WeakMap<BrowserWindow, BootCover>()
+  const liftBootCover = (): void => {
+    if (mainWindow !== undefined) bootCovers.get(mainWindow)?.lift()
+  }
   const backend = new DesktopBackendController((onFailure) => {
     const hostInspectPort = developmentHostInspectPort(development)
     const host = new DesktopHostProcess(resources.node, resources.dsh, activeProject,
@@ -493,7 +504,12 @@ async function main(): Promise<void> {
       inspectQuit: () => host.inspectQuit(),
     }
   }, (state) => {
-    if (state.phase === 'error') reportFatal(state.failure, 'host')
+    if (state.phase === 'error') {
+      // The native recovery dialog is the failure surface; an opaque cover must
+      // not strand the user behind it.
+      liftBootCover()
+      reportFatal(state.failure, 'host')
+    }
     else if (!shuttingDown) backendReady = state.phase === 'ready'
   })
 
@@ -560,6 +576,9 @@ async function main(): Promise<void> {
       // The existing Web document resumes through the boot IPC response.
     })().catch((error: unknown) => {
       updateJournal?.action('workspace-failed')
+      // The native recovery dialog is the failure surface; an opaque cover must
+      // not strand the user behind it.
+      liftBootCover()
       reportFatal(error, 'main')
       throw error
     }).finally(() => { startup = undefined })
@@ -1071,6 +1090,22 @@ async function main(): Promise<void> {
   const createMainWindow = (): BrowserWindow => {
     const window = createWindow(appPreload, false, true)
     mainWindow = window
+    if (linux) {
+      // The window appears as soon as the opaque boot cover has drawn, so the
+      // launch shows the animated cover from the first moment instead of an
+      // empty desktop until the Host is ready.
+      const palette = resolveBootPalette(nativeTheme.shouldUseDarkColors)
+      window.setBackgroundColor(palette.background)
+      const show = (): void => {
+        if (!window.isDestroyed() && !window.isVisible()) window.show()
+      }
+      // Fallback for a cover document that never paints: the application page
+      // exists by the time its own first load finishes.
+      window.webContents.once('did-finish-load', show)
+      const cover = raiseBootCover(window, palette, locale.messages.bootCoverCaption, show)
+      bootCovers.set(window, cover)
+      void waitUntilPageSettled(window.webContents).then(() => { cover.liftAfterVisible(BOOT_COVER_MIN_VISIBLE_MS) })
+    }
     browserGuests.bind(window, (guest, name) => shortcuts.attachGuest(window, guest, name))
     shortcuts.attach(window)
     window.on('focus', automaticCheck)

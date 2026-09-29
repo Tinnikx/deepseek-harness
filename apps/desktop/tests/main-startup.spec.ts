@@ -66,6 +66,7 @@ const harness = await vi.hoisted(async () => {
   class FakeWindow extends EventEmitter {
     destroyed = false
     readonly urls: string[] = []
+    readonly contentView = { addChildView: vi.fn(), removeChildView: vi.fn() }
     readonly webContents = Object.assign(new EventEmitter(), {
       id: 42,
       setWindowOpenHandler: vi.fn(),
@@ -79,6 +80,7 @@ const harness = await vi.hoisted(async () => {
       setIgnoreMenuShortcuts: vi.fn(),
       focus: vi.fn(),
       sendInputEvent: vi.fn(),
+      executeJavaScript: vi.fn(async (): Promise<unknown> => false),
       send: vi.fn((channel: string, state: { policy?: { blocking: boolean } }) => {
         if (channel === 'dsh-desktop:mandatory-state' && state.policy?.blocking) policyBlocked.resolve()
       }),
@@ -124,6 +126,23 @@ const harness = await vi.hoisted(async () => {
       this.emit('close', event)
       if (event.preventDefault.mock.calls.length === 0) this.destroy()
     }
+  }
+  // The Linux boot cover's renderer; specs answer its load and drive paint events.
+  const coverViews: FakeCoverView[] = []
+  class FakeCoverContents extends EventEmitter {
+    readonly urls: string[] = []
+    destroyed = false
+    readonly loadURL = vi.fn(async (url: string) => { this.urls.push(url) })
+    readonly isDestroyed = () => this.destroyed
+    readonly close = vi.fn(() => { this.destroyed = true })
+    readonly executeJavaScript = vi.fn(async (): Promise<unknown> => undefined)
+  }
+  class FakeCoverView {
+    readonly webContents = new FakeCoverContents()
+    bounds: { x: number; y: number; width: number; height: number } | undefined
+    readonly setBounds = vi.fn((bounds: { x: number; y: number; width: number; height: number }) => { this.bounds = bounds })
+    readonly setBackgroundColor = vi.fn()
+    constructor(readonly options: unknown) { coverViews.push(this) }
   }
   class FakeHost {
     readonly updateTasks = vi.fn(async (_action: 'inspect' | 'lock' | 'unlock') => false)
@@ -191,7 +210,7 @@ const harness = await vi.hoisted(async () => {
   const shellDialog = { isOpen: false, focus: vi.fn() }
   return {
     failWindow(error: Error) { windowFailure = error },
-    windows, hosts, handlers, app, FakeWindow, FakeHost, powerMonitor, nativeTheme, analytics,
+    windows, hosts, handlers, app, FakeWindow, FakeHost, FakeCoverView, coverViews, powerMonitor, nativeTheme, analytics,
     trays, FakeTray, backgroundNotice, shellDialog, statusNotifierHost, registeredItems,
     get trayRegistration() { return trayRegistration },
     menu, popup, socketHeaders: vi.fn(), updateCheck, updateDownload, updateInstall,
@@ -239,7 +258,7 @@ const harness = await vi.hoisted(async () => {
     set closeWindowsOnQuit(value: boolean) { closeWindowsOnQuit = value },
     reset() {
       accountListener = undefined
-      windows.length = 0; hosts.length = 0; handlers.clear(); app.removeAllListeners()
+      windows.length = 0; hosts.length = 0; coverViews.length = 0; handlers.clear(); app.removeAllListeners()
       trays.length = 0
       backgroundNotice.markerPath = undefined
       statusNotifierHost.mockReset().mockReturnValue(false)
@@ -280,6 +299,7 @@ vi.mock('../src/policy-test-auth.ts', () => ({ DesktopPolicyTestAuth: class {
 vi.mock('electron', () => ({
   app: harness.app,
   BrowserWindow: harness.FakeWindow,
+  WebContentsView: harness.FakeCoverView,
   dialog: harness.dialog,
   shell: { openExternal: harness.openExternal },
   nativeTheme: harness.nativeTheme,
@@ -802,6 +822,9 @@ describe('desktop main startup', () => {
     await import('../src/main.ts')
     await harness.preparing.promise
     const window = harness.windows[0]!
+    // The Linux boot cover paints the window fill once at creation; the
+    // minimized-backdrop swap belongs to macOS alone.
+    window.setBackgroundColor.mockClear()
     window.minimized = true
     window.emit('minimize')
     expect(window.setVibrancy).not.toHaveBeenCalled()
@@ -2153,6 +2176,36 @@ describe('desktop main startup', () => {
     expect(harness.hosts[0]!.start).toHaveBeenCalledTimes(1)
     expect(harness.windows).toHaveLength(1)
     expect(window.urls).toEqual(['dsh-app://app/'])
+  })
+
+  it('shows the Linux window on its painted boot cover and lifts when the page settles', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const window = harness.windows[0]!
+    const cover = harness.coverViews[0]!
+    expect(window.options.show).toBe(false)
+    window.visible = false
+    cover.webContents.emit('did-finish-load')
+    expect(window.show).toHaveBeenCalledOnce()
+    expect(window.setBackgroundColor).toHaveBeenCalledWith('#ffffff')
+    window.webContents.executeJavaScript.mockResolvedValue(true)
+    await vi.advanceTimersByTimeAsync(900)
+    expect(window.contentView.removeChildView).toHaveBeenCalledWith(cover)
+    expect(cover.webContents.close).toHaveBeenCalledOnce()
+  })
+
+  it('lifts the Linux boot cover before the native startup-failure dialog', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const window = harness.windows[0]!
+    const cover = harness.coverViews[0]!
+    harness.prepared.reject(new Error('runtime resources missing'))
+    await harness.dialogShown.promise
+    expect(window.contentView.removeChildView).toHaveBeenCalledWith(cover)
+    expect(window.contentView.removeChildView.mock.invocationCallOrder[0]!)
+      .toBeLessThan(harness.dialog.showMessageBox.mock.invocationCallOrder[0]!)
   })
 
   it('prepares an independent plugin profile for the unpackaged Host', async () => {

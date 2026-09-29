@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { JSDOM } from 'jsdom'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installMandatoryUpdateOverlay } from '../src/preload-mandatory-overlay.ts'
 import { syncWindowsAppearance } from '../src/preload-windows.ts'
 import { DESKTOP_IPC, type DshDesktopProductApi } from '../src/ipc.ts'
@@ -16,7 +16,9 @@ vi.mock('../src/preload-theme.ts', () => ({ syncNativeTheme: vi.fn() }))
 vi.mock('../src/preload-windows.ts', () => ({ syncWindowsAppearance: vi.fn() }))
 vi.mock('../src/preload-mandatory-overlay.ts', () => ({ installMandatoryUpdateOverlay: vi.fn() }))
 
-beforeEach(() => { vi.stubGlobal('process', { ...process, isMainFrame: true }) })
+// The Linux settle watcher owns its own tests; every other case runs with a
+// non-Linux platform so no watcher leaks a sampler into the shared document.
+beforeEach(() => { vi.stubGlobal('process', { ...process, platform: 'win32', isMainFrame: true }) })
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.resetModules() })
 
 it('reads only native login API-key presence through the onboarding bridge', async () => {
@@ -253,4 +255,69 @@ it('forwards browser guest input only for the focused live webview lease', async
   handler({}, input)
   expect(listener).toHaveBeenCalledOnce()
   off()
+})
+
+describe('Linux boot cover settle flag', () => {
+  beforeEach(() => { delete document.documentElement.dataset.dshBootSettled })
+
+  it('raises the settled flag only after the theme variable lands and the background holds', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('location', new URL('dsh-app://app/'))
+    vi.stubGlobal('process', { ...process, platform: 'linux', isMainFrame: true })
+    let themed = false
+    const computed = {
+      getPropertyValue: (name: string) => themed && name === '--dsw-alias-bg-base' ? '#151517' : '',
+      backgroundColor: 'rgb(21, 21, 23)',
+    }
+    vi.stubGlobal('getComputedStyle', () => computed)
+    await import('../src/preload-app.ts')
+    await vi.advanceTimersByTimeAsync(400)
+    expect(document.documentElement.dataset.dshBootSettled).toBeUndefined()
+    themed = true
+    await vi.advanceTimersByTimeAsync(100)
+    expect(document.documentElement.dataset.dshBootSettled).toBe('1')
+    vi.useRealTimers()
+  })
+
+  it('restarts the hold when the background changes before it settles', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('location', new URL('dsh-app://app/'))
+    vi.stubGlobal('process', { ...process, platform: 'linux', isMainFrame: true })
+    let color = 'rgba(0, 0, 0, 0)'
+    vi.stubGlobal('getComputedStyle', () => ({
+      getPropertyValue: () => '#ffffff',
+      get backgroundColor() { return color },
+    }))
+    await import('../src/preload-app.ts')
+    await vi.advanceTimersByTimeAsync(300)
+    color = 'rgb(21, 21, 23)'
+    await vi.advanceTimersByTimeAsync(300)
+    expect(document.documentElement.dataset.dshBootSettled).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(200)
+    expect(document.documentElement.dataset.dshBootSettled).toBe('1')
+    vi.useRealTimers()
+  })
+
+  it.each(['win32', 'darwin'])('stays off %s, where no boot cover exists', async (platform) => {
+    vi.useFakeTimers()
+    vi.stubGlobal('location', new URL('dsh-app://app/'))
+    vi.stubGlobal('process', { ...process, platform, isMainFrame: true })
+    const read = vi.fn(() => ({ getPropertyValue: () => '#ffffff', backgroundColor: 'rgb(255, 255, 255)' }))
+    vi.stubGlobal('getComputedStyle', read)
+    await import('../src/preload-app.ts')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(document.documentElement.dataset.dshBootSettled).toBeUndefined()
+    expect(read).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('does not observe frames that are not the main frame', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('location', new URL('dsh-app://app/'))
+    vi.stubGlobal('process', { ...process, platform: 'linux', isMainFrame: false })
+    await import('../src/preload-app.ts')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(document.documentElement.dataset.dshBootSettled).toBeUndefined()
+    vi.useRealTimers()
+  })
 })
