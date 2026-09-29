@@ -7,6 +7,7 @@ import { resolveWindowsPackageSettings } from '../scripts/windows-package-settin
 
 const WINDOWS = { platform: 'win32', arch: 'x64' } as const
 const MACOS = { platform: 'darwin', arch: 'arm64' } as const
+const LINUX = { platform: 'linux', arch: 'x64' } as const
 const POLICY = { DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN: 'https://policy.example.com',
   DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: JSON.stringify({ allowedAuthOrigins: ['https://login.example.com'] }) }
 const RELEASE = { ...POLICY, DSH_DESKTOP_APP_ID: 'com.example.desktop', DOWNLOAD_TEST_ORIGIN: 'https://updates.example.com',
@@ -51,6 +52,7 @@ describe('Desktop local packaging configuration', () => {
     await withDirectory(async (directory) => {
       await writeFile(join(directory, '.env.windows'), '\uFEFFDSH_DESKTOP_APP_ID=com.example.windows\r\nDSH_DESKTOP_WINDOWS_TOKEN_PIN=" #!$%&literal "\r\nDSH_DESKTOP_WINDOWS_CER_FILE="keys/public certificate.cer"\r\n')
       await writeFile(join(directory, '.env.macos'), 'DSH_DESKTOP_APP_ID=com.example.mac\nAPPLE_KEYCHAIN_PROFILE=release\nCSC_LINK=keys/signing.p12\nCSC_KEY_PASSWORD=" # literal "\n')
+      await writeFile(join(directory, '.env.linux'), 'DSH_DESKTOP_APP_ID=com.example.linux\nDOWNLOAD_TEST_ORIGIN=https://linux.example.com\n')
       const parent = {
         PATH: 'build-tools', DSH_DESKTOP_APP_ID: 'com.stale.desktop',
         DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: '{"origin":"https://stale.example.com"}',
@@ -70,6 +72,9 @@ describe('Desktop local packaging configuration', () => {
       expect(loadDesktopPackageEnvironment('darwin', parent, directory)).toEqual({
         PATH: 'build-tools', DSH_DESKTOP_APP_ID: 'com.example.mac', APPLE_KEYCHAIN_PROFILE: 'release',
         CSC_LINK: join(directory, 'keys/signing.p12'), CSC_KEY_PASSWORD: ' # literal ',
+      })
+      expect(loadDesktopPackageEnvironment('linux', parent, directory)).toEqual({
+        PATH: 'build-tools', DSH_DESKTOP_APP_ID: 'com.example.linux', DOWNLOAD_TEST_ORIGIN: 'https://linux.example.com',
       })
       expect(parent.DSH_DESKTOP_WINDOWS_TOKEN_PIN).toBe('stale-pin')
       expect(parent.dsh_desktop_mandatory_update_config).toBe('stale-policy')
@@ -115,7 +120,28 @@ describe('Desktop local packaging configuration', () => {
       await writeFile(join(directory, '.env.windows'), 'APPLE_APP_SPECIFIC_PASSWORD=secret-sentinel\n')
       expect(() => loadDesktopPackageEnvironment('win32', {}, directory)).toThrow(/unsupported setting APPLE_APP_SPECIFIC_PASSWORD/u)
       expect(() => loadDesktopPackageEnvironment('win32', {}, directory)).not.toThrow(/secret-sentinel/u)
+      // An unsigned AppImage admits no platform setting, so both other-platform names are rejected.
+      for (const name of ['APPLE_APP_SPECIFIC_PASSWORD', 'DSH_DESKTOP_WINDOWS_TOKEN_PIN']) {
+        await writeFile(join(directory, '.env.linux'), `${name}=secret-sentinel\n`)
+        expect(() => loadDesktopPackageEnvironment('linux', {}, directory)).toThrow(new RegExp(`unsupported setting ${name}`, 'u'))
+        expect(() => loadDesktopPackageEnvironment('linux', {}, directory)).not.toThrow(/secret-sentinel/u)
+      }
     })
+  })
+
+  it('validates a Linux release with no signing credential at all', () => {
+    expect(() => {
+      validateDesktopPackageEnvironment({ ...POLICY, DSH_DESKTOP_APP_ID: RELEASE.DSH_DESKTOP_APP_ID }, LINUX)
+    }).toThrow(/DOWNLOAD_TEST_ORIGIN/u)
+    expect(() => {
+      validateDesktopPackageEnvironment(RELEASE, LINUX)
+    }).not.toThrow()
+    expect(() => {
+      validateDesktopPackageEnvironment(RELEASE, WINDOWS)
+    }).toThrow(/DSH_DESKTOP_WINDOWS_CER_FILE/u)
+    expect(() => {
+      validateDesktopPackageEnvironment(RELEASE, MACOS)
+    }).toThrow(/DSH_DESKTOP_MACOS_SIGNING_IDENTITY/u)
   })
 
   it('checks application and update configuration before Windows credentials while preserving unsigned and preparation modes', () => {

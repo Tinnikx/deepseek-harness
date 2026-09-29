@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-09-28-desktop-linux-release-target.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-28-desktop-linux-release-target.md
+/agent-note-ship-the-desktop-application-for-linux-x64-as-an-appimage:
+  en: 8e92a8fd312e60e4
+  zh: 5be6fa196bb8c762
+/agent-note-ship-the-desktop-application-for-linux-x64-as-an-appimage/problem:
+  en: 83c1b703a7c1af8b
+  zh: d4e5e9df8d655dd7
+/agent-note-ship-the-desktop-application-for-linux-x64-as-an-appimage/decision:
+  en: 8f4d19e71306aca3
+  zh: 4ceb47e3121fb2ef
+/agent-note-ship-the-desktop-application-for-linux-x64-as-an-appimage/alternatives-considered:
+  en: 79d7a1ac882c4c0d
+  zh: e995b49033fe6c95
+/agent-note-ship-the-desktop-application-for-linux-x64-as-an-appimage/consequences:
+  en: 90f0962af274d339
+  zh: fe138a5a61991e61

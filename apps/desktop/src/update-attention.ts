@@ -26,16 +26,18 @@ export class DesktopUpdateAttention {
     if (parent.isFocused() || modal.isFocused()) return
     const clear = (): void => { this.clear() }
     let bounce: number | undefined
+    // Windows and X11 Linux flash the taskbar entry; macOS bounces the Dock instead.
+    const flashesFrame = this.platform === 'win32' || this.platform === 'linux'
     parent.on('focus', clear)
     modal.on('focus', clear)
     this.stop = () => {
       parent.off('focus', clear)
       modal.off('focus', clear)
-      if (this.platform === 'win32' && !parent.isDestroyed()) parent.flashFrame(false)
+      if (flashesFrame && !parent.isDestroyed()) parent.flashFrame(false)
       if (bounce !== undefined) app.dock?.cancelBounce(bounce)
     }
     try {
-      if (this.platform === 'win32') parent.flashFrame(true)
+      if (flashesFrame) parent.flashFrame(true)
       if (this.platform === 'darwin') bounce = app.dock?.bounce('informational')
     } catch (error) { console.warn('desktop update: attention unavailable', error) }
     try {

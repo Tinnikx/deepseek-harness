@@ -1,7 +1,7 @@
 /** Materialize the complete production runtime before publishing Desktop resources. */
 
 import { packagingStep } from './packaging-step.mjs'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join, relative, resolve } from 'node:path'
@@ -29,7 +29,8 @@ import {
 import {
   signMacOSRuntime,
 } from './macos-runtime.ts'
-import { resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
+import { desktopHostExecutable } from '../src/host-launcher.ts'
+import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
 import { desktopRuntimeFileExclusion } from './runtime-file-policy.ts'
 import { selectOfficeEngine } from '../../../scripts/libreoffice-packages.mjs'
 
@@ -41,7 +42,12 @@ const STORE_ROOT = join(BUILD_ROOT, 'store')
 const RUNTIME_ROOT = BUILD_PATHS.runtime
 const PNPM_BUILD_STATE = BUILD_PATHS.dshPnpm
 const PACKAGE_SET_ROOT = BUILD_PATHS.packageSet
-const NODE = join(BUILD_PATHS.electron, process.platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
+const ELECTRON = join(BUILD_PATHS.electron,
+  process.platform === 'win32' ? 'electron.exe'
+    : process.platform === 'darwin' ? 'Electron.app/Contents/MacOS/Electron'
+      : 'electron')
+// The packaged Host launcher, so this smoke exercises the executable the installed application uses.
+const NODE = desktopHostExecutable(ELECTRON, join(RUNTIME_ROOT, 'primary-runtime'))
 const PNPM = join(RUNTIME_ROOT, 'pnpm', 'bin', 'pnpm.mjs')
 
 function manifestVersion(path: string, subject: string): string {
@@ -61,9 +67,20 @@ function desktopRelease(): DesktopRelease {
     schemaVersion: 1,
     version,
     hostProtocolVersion: DESKTOP_HOST_PROTOCOL_VERSION,
-    nodeVersion: runtime.node,
+    nodeVersion: hostNodeVersion(),
     pnpmVersion: runtime.pnpm,
   })
+}
+
+/**
+ * Report the Node version of the executable that runs the packaged Host.
+ * Electron and the payload Node carry different versions, and `versions.json` records Electron's.
+ * @returns Version string printed by the Host launcher.
+ */
+function hostNodeVersion(): string {
+  return execFileSync(NODE, ['-p', 'process.versions.node'], {
+    encoding: 'utf8', env: desktopNodeEnvironment(NODE, undefined, process.env),
+  }).trim()
 }
 
 function runPnpm(args: readonly string[]): Promise<void> {
@@ -130,7 +147,7 @@ async function main(): Promise<void> {
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:install', () => runPnpm(['install', '--prod', '--frozen-lockfile', '--trust-lockfile']))
     const packageSet = readDesktopCorePackageSet(BUILD_ROOT, release.version)
     const targetName = resolveDesktopBuildTarget()
-    const target = { platform: process.platform, arch: targetName.endsWith('arm64') ? 'arm64' : 'x64' }
+    const target = desktopTargetPlatform(targetName)
     const modules = join(BUILD_ROOT, 'node_modules')
     const officeManifest = JSON.parse(readFileSync(join(modules, '@deepseek-ai/libreoffice-kit/package.json'), 'utf8'))
     const officeEngine = selectOfficeEngine(officeManifest, target)

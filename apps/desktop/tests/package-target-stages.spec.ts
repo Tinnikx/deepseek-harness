@@ -102,6 +102,24 @@ it.each(['--unsigned', '--prepare-only'])('keeps %s hardware-free and creates no
   expect(stages.includes('exec tsx scripts/smoke-packaged-runtime.ts --unsigned')).toBe(mode === '--unsigned')
 })
 
+it('builds the Linux AppImage with no signing stage and records its own feed', async () => {
+  const { run, stages } = supervisor()
+  await packageTarget(parseDesktopPackageInvocation(['linux-x64'], 'linux', 'x64'), environment, run)
+  expect(stages).toContain('exec electron-builder --config electron-builder.config.mjs --linux --x64 --publish never')
+  expect(stages).not.toContain('preflight:windows-signing')
+  expect(stages.filter(stage => stage.startsWith('run sign:primary-runtime'))).toHaveLength(0)
+  expect(withWindowsSigningStage).not.toHaveBeenCalled()
+  for (const call of run.run.mock.calls) {
+    if (call[0].startsWith('run prepare:') || call[0].includes('smoke-packaged-runtime')) {
+      expect(call[3].env).not.toHaveProperty('DSH_DESKTOP_WINDOWS_TOKEN_PIN')
+    }
+  }
+  expect(stages.at(-1)).toBe('exec tsx scripts/smoke-packaged-runtime.ts')
+  expect(writeFileSync).toHaveBeenCalledOnce()
+  const record = JSON.parse(vi.mocked(writeFileSync).mock.calls[0]![1] as string) as { publicUrl: string }
+  expect(record.publicUrl).toBe('https://updates.example.com/dsh-desk/0123456789abcdef0123456789abcdef/feeds/linux-x64/')
+})
+
 it('checks the assembled macOS runtime before notarizing and recording the release', async () => {
   const { run, stages } = supervisor()
   vi.mocked(packageMacOSArtifacts).mockImplementationOnce(async () => {

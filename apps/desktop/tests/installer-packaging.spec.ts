@@ -1,8 +1,10 @@
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { Arch, Platform } from 'electron-builder'
 import { Packager } from 'app-builder-lib'
 import { describe, expect, it, vi } from 'vitest'
+import { LINUX_EXECUTABLE_NAME } from '../scripts/desktop-build-paths.mjs'
 
 const { execute } = vi.hoisted(() => ({ execute: vi.fn(async () => undefined) }))
 vi.mock('node:child_process', async (importOriginal) => {
@@ -40,13 +42,15 @@ describe('installer preparation preserves application dependencies', () => {
       const aboutIcon = config.extraResources.find(resource => resource.to === 'icon.png')
       expect(aboutIcon).toBeDefined()
       expect(readFileSync(aboutIcon!.from)).toEqual(readFileSync(new URL('../resources/icon-windows.png', import.meta.url)))
-      // Only the Windows package carries the tray bitmaps; macOS keeps the Dock.
+      // Only the Windows package carries the tray bitmaps; macOS keeps the Dock and neither draws a panel PNG.
       const trayIcon = config.extraResources.find(resource => resource.to === 'tray.ico')
       if (platform === 'win32') {
         expect(readFileSync(trayIcon!.from)).toEqual(readFileSync(new URL('../resources/tray-windows.ico', import.meta.url)))
       } else {
         expect(trayIcon).toBeUndefined()
       }
+      expect(config.extraResources.some(resource => resource.to === 'tray.png')).toBe(false)
+      expect(config.extraMetadata).not.toHaveProperty('desktopName')
       const packager = new Packager({ projectDir: tmpdir() })
       // A foreign source-build target avoids rebuilding modules; the real dependency ownership decision still runs.
       Object.defineProperties(packager, {
@@ -62,6 +66,32 @@ describe('installer preparation preserves application dependencies', () => {
       vi.unstubAllEnvs()
       vi.restoreAllMocks()
     }
+  })
+
+  it('packages the Linux AppImage with its own executable name and panel icon', async () => {
+    const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
+    const config = createElectronBuilderConfig({
+      DSH_DESKTOP_APP_ID: 'com.example.installer',
+      DSH_DESKTOP_AUTO_UPDATE_ENV: 'test',
+      DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN: 'https://policy.example.com',
+      DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: JSON.stringify({ allowedAuthOrigins: ['https://login.example.com'] }),
+      DSH_DESKTOP_TARGET_PLATFORM: 'linux',
+      DSH_DESKTOP_TARGET_ARCH: 'x64',
+      DOWNLOAD_TEST_ORIGIN: 'https://desktop-updates.example.com',
+      DOWNLOAD_TEST_RELEASE_ID: '0123456789abcdef0123456789abcdef',
+    }, 'linux', 'x64')
+    expect(config.directories.output).toContain(join('targets', 'linux-x64', 'artifacts'))
+    expect(config.linux).toMatchObject({
+      executableName: LINUX_EXECUTABLE_NAME, syncDesktopName: true, category: 'Development', target: ['AppImage'],
+    })
+    // Electron derives its Linux app_id from the manifest's desktopName, which carries the appId.
+    expect(config.extraMetadata.desktopName).toBe('com.example.installer.desktop')
+    // The About panel reads the original artwork, and the panel draws one Linux PNG.
+    const aboutIcon = config.extraResources.find(resource => resource.to === 'icon.png')
+    expect(readFileSync(aboutIcon!.from)).toEqual(readFileSync(new URL('../resources/icon.png', import.meta.url)))
+    const panelIcon = config.extraResources.find(resource => resource.to === 'tray.png')
+    expect(readFileSync(panelIcon!.from)).toEqual(readFileSync(new URL('../resources/tray-linux.png', import.meta.url)))
+    expect(config.extraResources.some(resource => resource.to === 'tray.ico')).toBe(false)
   })
 
   it('names unsigned Windows artifacts so they cannot pass for release builds', async () => {

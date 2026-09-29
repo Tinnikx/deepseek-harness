@@ -1,0 +1,47 @@
+# Agent Note: Ship the Desktop application for Linux x64 as an AppImage
+
+Status: implemented
+
+English | [中文](2026-09-28-desktop-linux-release-target.zh.md)
+
+Packaging and the update feed follow [the Electron Desktop packaging and updates decision](2026-08-25-electron-desktop-packaging-and-updates.md), whose initial platform row excluded Linux. Close-to-background behavior follows [hiding the Desktop window on close](2026-09-23-desktop-close-to-background-and-quit-confirmation.md); this Agent Note partially supersedes that one for Linux, where a window hides only when the desktop will draw a way back.
+
+## Problem
+
+The packaged Desktop application ran on Linux during development but could not be released there. Every release target was enumerated as `mac-arm64`, `mac-x64`, or `win-x64`, so a Linux build host was rejected before preparation, and a hand-built package would still have failed: the mandatory-update policy read the installed platform and threw `desktop policy: unsupported platform` for anything outside Windows and macOS, so the shipped application would show a fatal dialog instead of a window. The payload itself was never the obstacle — the bundled Node and Python runtime, `node-pty`, the Landlock launcher, ripgrep, and the sandbox's `bwrap`/`landlock` runner chain already declare Linux, and the Office conversion kit declares a WASM engine for hosts without a native LibreOffice package.
+
+Releasing Linux also means deciding what an unsigned artifact means for a product that auto-updates, and what happens to a hidden window on a platform with neither a Dock nor a guaranteed system tray.
+
+## Decision
+
+`linux-x64` is a first-class Desktop release target that produces one unsigned AppImage. Packaging, the completion record, the COS upload plan, and the updater feed treat it like the existing targets: the channel file is `nightly-linux.yml` (with `latest-linux.yml` for a stable version), binaries live under `bin/linux-x64/`, and the published artifact is `deepseek-harness-<version>-linux-x64.AppImage`. `linux-arm64`, `deb`, `rpm`, and any Linux signing are not targets; the release scope stays x64 because Windows stays x64 and nothing asked for more.
+
+electron-builder embeds an AppImage's differential-update blockmap inside the artifact, so a Linux release publishes one binary object where macOS and Windows publish the updater payload plus a separate `.blockmap`. The updater replaces the AppImage in place, which requires the installation to be launched from the `.AppImage` file itself; `--appimage-extract-and-run` leaves no file to replace. Linux packaging therefore needs no signing or notarization settings, and `.env.linux` admits only the shared release fields — a stray macOS or Windows field is rejected rather than ignored. electron-builder downloads its own AppImage toolset, so the build host needs no squashfs tools, and the toolchain preflight adds no Linux probe.
+
+The packaged Linux application identifies itself honestly. The mandatory-update policy accepts `linux` and reports the installed platform and architecture the same way it does elsewhere; the embedded Platform account view and the Host account plugin send `x-client-platform: desktop-linux`, and the packaged manifest carries `desktopName` so Electron's Linux window class matches the `.desktop` entry electron-builder writes.
+
+The dsh Host is a Node child, and its launcher is the payload's own Node on Linux: Electron contributes one GLib to the process and sharp's bundled libvips binds another, which segfaults image decoding on a worker thread, while the same payload decodes images correctly under that Node. macOS and Windows keep Electron in Node mode. The prepared-runtime and packaged smokes launch the Host with the same executable the installed application uses, so this platform difference cannot ship untested. That Node reads no ASAR archive, so a Linux package keeps its dsh tree unpacked under `resources/app.asar.unpacked/dsh`, and electron-builder's Linux architecture spelling (`x86_64`) is overridden by an explicit artifact name so every release object keeps the `linux-x64` target spelling used by the feed and upload paths.
+
+Closing the main window hides it on Linux only when a StatusNotifierItem is actually drawn. Ownership of `org.kde.StatusNotifierWatcher` is necessary but not sufficient: measured on KDE Plasma 6, Electron exported `org.freedesktop.StatusNotifierItem-<pid>-1` on the session bus while the watcher's `RegisteredStatusNotifierItems` list never gained it, under both Wayland and X11. So the shell first asks whether any shell owns the watcher, builds the tray through the existing `DesktopTray`, and then reads that list back for up to three seconds; window hiding turns on only when an item the watcher did not hold before appears, and otherwise the icon is destroyed and close quits through the ordinary quit confirmation. A session with no watcher — GNOME without the AppIndicator extension, a bare compositor, or no session bus — never builds the icon. Either failure path ends in a quit rather than a hidden window nobody can reopen, because a stranded Host keeps running with no way back. Taskbar flashing joins Windows as the update-attention surface; macOS keeps the Dock bounce.
+
+## Alternatives considered
+
+**A single table owning every release target.** The target list existed in six scripts, each shaped slightly differently, and the cross-file sync tests existed to keep them honest. Adding a seventh shape would have been a larger refactor than this change and would have forced every consumer through one module at the same time the payload behavior was changing, so each list gained its `linux-x64` row instead and the duplication stays where the tests already watch it.
+
+**`deb` alongside the AppImage.** A `deb` is easier to install through a package manager and gains no auto-update path — electron-updater only replaces the AppImage — so it would have added a second artifact, package metadata, and a manual-install channel with no measured demand. It returns when there is a distributor asking for it.
+
+**Quit on close for Linux, unconditionally.** Simplest and never strands a window, but it cuts running agents and scheduled reminders on the gesture that macOS and Windows both treat as backgrounding. Choosing per desktop session keeps tasks running wherever a way back exists.
+
+**Always create the tray and hide.** Electron's Linux tray fails silently without a StatusNotifier watcher, which is the stranded-window case this decision exists to avoid; a tray that is not drawn is not a way back.
+
+**Trust the watcher's name alone.** One `NameHasOwner` reply was the first rule here, on the assumption that a shell which owns the watcher draws whatever registers with it. KDE Plasma 6 answers that query and still never lists Electron's item, which would hide a window behind an icon nobody sees. Reading the registered list back costs a few session-bus reads at startup and runs only where the watcher already exists.
+
+**Report the Linux shell as `desktop-mac`.** Carrying the old mislabel needed no contract change and kept analytics counting Linux sessions as Mac ones. `desktop-linux` is a new value on the `x-client-platform` header that the Platform service has not confirmed; if it rejects the value, the header set reverts and this paragraph records that.
+
+**Hide the About-panel icon difference.** The packaged `resources/icon.png` is the Windows tile artwork for every platform, and Linux — unlike macOS — draws it in its About panel. Shipping the original artwork to Linux keeps the visible identity correct without changing the macOS or Windows payload bytes that archive-integrity checks pin.
+
+## Consequences
+
+Linux users get a single-file release that updates itself, an honest client identity, and close-to-background behavior where their desktop supports it. The repository gained a fourth release target in six enumerations, one more dotenv file, and one more artifact lane, and its Windows-only tray code is now shared by two platforms with different availability.
+
+What it costs: a Linux release cannot be signed or notarized, so first launch depends on the user's own download integrity check rather than a platform signature; the release-scope guarantee is x64 only; `desktop-linux` awaits confirmation from the Platform service; the AppImage's auto-update is exercised only where the installation runs from the AppImage file in place. The Linux tray and its first-close acknowledgement are user-perceivable, so they need design review before a release ships, even though the panel icon reuses the existing artwork instead of a new glyph. Verifying a Linux release still requires the release operator to run the real COS upload and one cross-version update, because neither the feed nor the differential download can be rehearsed without published objects.

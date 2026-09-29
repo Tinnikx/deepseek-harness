@@ -71,6 +71,16 @@ describe('desktop build version discovery', () => {
       .resolves.toBe(`${PRERELEASE}.${DATE}.4`)
   })
 
+  it('reads Linux AppImage artifact names too', async () => {
+    const artifactsRoot = await artifactsWith([
+      `deepseek-harness-${PRERELEASE}.${DATE}.3-linux-x64.AppImage`,
+      `deepseek-harness-${PRERELEASE}.${DATE}.9-linux-x64.AppImage.blockmap`,
+      `deepseek-harness-${PRERELEASE}.${DATE}.11-freebsd-x64.AppImage`,
+    ])
+    await expect(suggestDesktopBuildVersion({ productVersion: PRERELEASE, target: 'linux-x64', environment: {}, date: DATE, artifactsRoot }))
+      .resolves.toBe(`${PRERELEASE}.${DATE}.4`)
+  })
+
   it('counts unsigned Windows artifacts written under their own suffix', async () => {
     const artifactsRoot = await artifactsWith([
       `deepseek-harness-${PRERELEASE}.${DATE}.2-win-x64-unsigned.exe`,

@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { WebContentsView, session, shell, type Session, type View, type WebFrameMain } from 'electron'
 import { mergePlatformCookies, platformClientHeaders, type PlatformSession } from '@deepseek-ai/dsh-deepseek-account'
 import { desktopClientMetadata } from './client-metadata.ts'
+import type { DesktopReportedPlatform } from './desktop-platform.ts'
 
 import { PLATFORM_IPC, type PlatformLocale } from './platform-ipc.ts'
 
@@ -50,10 +51,10 @@ export class DesktopPlatformView {
   /**
    * @param preload - bundled sandboxed Platform preload path.
    * @param getLocale - current resolved Desktop language.
-   * @param platform - operating system this shell runs on, reported to Platform.
+   * @param platform - operating system this shell runs on, reported to Platform; null identifies the host as web.
    */
   constructor(private readonly preload: string, private readonly getLocale: () => PlatformLocale,
-    private readonly platform: 'darwin' | 'win32') {}
+    private readonly platform: DesktopReportedPlatform | null) {}
 
   /** @param next - private Host credentials; identity enrichment preserves an already open temporary document. */
   setSession(next: PlatformSession | null): void {

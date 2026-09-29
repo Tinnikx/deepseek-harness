@@ -14,6 +14,10 @@ const TEST_ORIGIN = 'https://desktop-updates.example.com'
 const TEST_BUCKET = 'test-download-bucket'
 const RELEASE_ID = '0123456789abcdef0123456789abcdef'
 const PRODUCTION_BUCKET = 'production-download-bucket'
+/** Updater binary each target's channel metadata references; the AppImage embeds its own blockmap. */
+const UPDATER_EXTENSION: Record<DesktopPackageTargetName, string> = {
+  'mac-arm64': '.zip', 'mac-x64': '.zip', 'win-x64': '.exe', 'linux-x64': '.AppImage',
+}
 const require = createRequire(import.meta.url)
 const { createBlockmap } = require('app-builder-lib/out/targets/differentialUpdateInfoBuilder.js') as {
   createBlockmap: (file: string, target: object, packager: { info: { emitArtifactBuildCompleted(event: object): Promise<void> } },
@@ -45,7 +49,7 @@ async function fixture(
   await writeFile(join(repositoryRoot, 'package.json'), `${JSON.stringify({ version })}\n`)
   await writeFile(join(appRoot, 'package.json'), `${JSON.stringify({ version })}\n`)
 
-  const [os, arch] = target.split('-') as ['mac' | 'win', 'arm64' | 'x64']
+  const [os, arch] = target.split('-') as ['mac' | 'win' | 'linux', 'arm64' | 'x64']
   const base = `deepseek-harness-${version}-${os}-${arch}`
   const origin = environment === 'test'
     ? TEST_ORIGIN
@@ -67,6 +71,15 @@ async function fixture(
       version,
       path: `${base}.zip`,
       files: [{ url: `${base}.zip`, size: Buffer.byteLength(zip), sha512: digest(zip) }],
+    })}\n`)
+  }
+  else if (os === 'linux') {
+    const appImage = 'Linux AppImage fixture'
+    await writeFile(join(artifactsRoot, `${base}.AppImage`), appImage)
+    await writeFile(join(artifactsRoot, desktopUpdateMetadataFilename(version, 'linux')), `${JSON.stringify({
+      version,
+      path: `${base}.AppImage`,
+      files: [{ url: `${base}.AppImage`, size: Buffer.byteLength(appImage), sha512: digest(appImage) }],
     })}\n`)
   }
   else {
@@ -151,11 +164,32 @@ describe('desktop upload plan', () => {
     })
   })
 
-  it.each(['mac-arm64', 'mac-x64', 'win-x64'] as const)('publishes every %s object and YAML reference inside the test release directory', async (target) => {
+  it('uploads the checksummed AppImage alone because its blockmap is embedded', async () => {
+    const paths = await fixture('linux-x64')
+    const plan = await createDesktopUploadPlan('linux-x64', paths)
+    expect(plan.artifacts.map(artifact => artifact.filename)).toEqual([
+      'deepseek-harness-1.2.3-linux-x64.AppImage',
+      'nightly-linux.yml',
+      'latest-linux.yml',
+    ])
+    expect(plan.artifacts[0]).toMatchObject({
+      key: `dsh-desk/${RELEASE_ID}/bin/linux-x64/deepseek-harness-1.2.3-linux-x64.AppImage`,
+      contentType: 'application/octet-stream',
+    })
+    expect(load(plan.artifacts[1]!.contents!)).toMatchObject({
+      version: '1.2.3',
+      files: [{
+        url: `${TEST_ORIGIN}/dsh-desk/${RELEASE_ID}/bin/linux-x64/deepseek-harness-1.2.3-linux-x64.AppImage`,
+        sha512: digest('Linux AppImage fixture'),
+      }],
+    })
+  })
+
+  it.each(['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64'] as const)('publishes every %s object and YAML reference inside the test release directory', async (target) => {
     const paths = await fixture(target)
     const plan = await createDesktopUploadPlan(target, paths)
     const prefix = `dsh-desk/${RELEASE_ID}`
-    const payload = plan.artifacts.find(artifact => artifact.filename.endsWith(target === 'win-x64' ? '.exe' : '.zip'))!
+    const payload = plan.artifacts.find(artifact => artifact.filename.endsWith(UPDATER_EXTENSION[target]))!
     for (const artifact of plan.artifacts) {
       expect(artifact.key).toBe(`${prefix}/${artifact.channelMetadata ? 'feeds' : 'bin'}/${target}/${artifact.filename}`)
       if (artifact.channelMetadata) {

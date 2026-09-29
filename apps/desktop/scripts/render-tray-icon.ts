@@ -1,10 +1,11 @@
 /**
- * Render the Windows tray icon with an enlarged whale from `resources/icon-windows.svg`.
+ * Render the tray icons from the `tray-glyph` group of `resources/icon-windows.svg`.
  *
  * The tray shows the icon at 16 logical pixels, so Windows picks one of the
  * bundled bitmaps by display scale. Each size is rasterized from the vector
  * source separately instead of downscaling one large bitmap, which keeps edges
- * crisp at every scale. The committed `resources/tray-windows.ico` is the output;
+ * crisp at every scale. The Linux panel draws one PNG and scales it itself. The
+ * committed outputs are `resources/tray-windows.ico` and `resources/tray-linux.png`;
  * rerun `pnpm run render:tray-icon` in `apps/desktop` after changing the vector source.
  */
 
@@ -16,11 +17,15 @@ import sharp from 'sharp'
 /** Bitmap edge lengths bundled in the tray icon: 16 px at 100 % through 400 % display scale. */
 export const TRAY_ICON_SIZES = [16, 20, 24, 32, 40, 48, 64] as const
 
-/** Vector source and committed output of the tray icon. */
+/** Vector source and committed outputs of the tray icons. */
 export const TRAY_ICON_PATHS = {
   source: fileURLToPath(new URL('../resources/icon-windows.svg', import.meta.url)),
   output: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)),
+  linuxOutput: fileURLToPath(new URL('../resources/tray-linux.png', import.meta.url)),
 } as const
+
+/** Edge of the Linux panel icon; the desktop environment scales it for HiDPI. */
+export const LINUX_TRAY_ICON_SIZE = 24
 
 /** Coordinate space of the vector source; sharp's SVG density is scaled against it. */
 const SOURCE_EDGE = 1024
@@ -115,9 +120,13 @@ function pngDimensions(png: Buffer): { width: number; height: number } {
 }
 
 async function main(): Promise<void> {
-  const entries = await renderTrayIconEntries(await readFile(TRAY_ICON_PATHS.source))
+  const svg = await readFile(TRAY_ICON_PATHS.source)
+  const entries = await renderTrayIconEntries(svg)
   await writeFile(TRAY_ICON_PATHS.output, packIco(entries))
-  console.info(`tray icon: wrote ${TRAY_ICON_PATHS.output} with ${entries.map(entry => String(entry.size)).join(', ')} px bitmaps`)
+  const [linuxIcon] = await renderTrayIconEntries(svg, [LINUX_TRAY_ICON_SIZE])
+  if (linuxIcon === undefined) throw new Error(`tray icon: no bitmap rendered for edge ${String(LINUX_TRAY_ICON_SIZE)}`)
+  await writeFile(TRAY_ICON_PATHS.linuxOutput, linuxIcon.png)
+  console.info(`tray icon: wrote ${TRAY_ICON_PATHS.output} with ${entries.map(entry => String(entry.size)).join(', ')} px bitmaps and ${TRAY_ICON_PATHS.linuxOutput} at ${String(LINUX_TRAY_ICON_SIZE)} px`)
 }
 
 if (process.argv[1] !== undefined && import.meta.filename === resolve(process.argv[1])) await main()

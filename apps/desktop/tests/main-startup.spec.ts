@@ -184,11 +184,16 @@ const harness = await vi.hoisted(async () => {
     constructor(readonly image: unknown) { super(); trays.push(this) }
   }
   const backgroundNotice = { close: vi.fn((hide: () => void) => { hide() }), dispose: vi.fn(), markerPath: undefined as string | undefined }
+  // A Linux session draws the tray only when some shell owns the StatusNotifier watcher; specs decide the answer.
+  const statusNotifierHost = vi.fn(() => false)
+  const registeredItems = vi.fn((): string[] => [])
+  let trayRegistration = Promise.withResolvers<boolean>()
   const shellDialog = { isOpen: false, focus: vi.fn() }
   return {
     failWindow(error: Error) { windowFailure = error },
     windows, hosts, handlers, app, FakeWindow, FakeHost, powerMonitor, nativeTheme, analytics,
-    trays, FakeTray, backgroundNotice, shellDialog,
+    trays, FakeTray, backgroundNotice, shellDialog, statusNotifierHost, registeredItems,
+    get trayRegistration() { return trayRegistration },
     menu, popup, socketHeaders: vi.fn(), updateCheck, updateDownload, updateInstall,
     platformDispose,
     platformCloseAndWait,
@@ -237,6 +242,9 @@ const harness = await vi.hoisted(async () => {
       windows.length = 0; hosts.length = 0; handlers.clear(); app.removeAllListeners()
       trays.length = 0
       backgroundNotice.markerPath = undefined
+      statusNotifierHost.mockReset().mockReturnValue(false)
+      registeredItems.mockReset().mockReturnValue([])
+      trayRegistration = Promise.withResolvers<boolean>()
       shellDialog.isOpen = false
       powerMonitor.removeAllListeners()
       app.isPackaged = true
@@ -298,6 +306,12 @@ vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
   readonly close = harness.backgroundNotice.close
   readonly dispose = harness.backgroundNotice.dispose
 } }))
+// The StatusNotifier probe spawns gdbus; specs answer the watcher and the registration read-back.
+vi.mock('../src/tray-availability.ts', () => ({
+  hasStatusNotifierHost: harness.statusNotifierHost,
+  readRegisteredStatusNotifierItems: harness.registeredItems,
+  trayRegistrationConfirmed: () => harness.trayRegistration.promise,
+}))
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>()
   return { ...original, readFile: vi.fn((path: Parameters<typeof original.readFile>[0], encoding?: 'utf8') => {
@@ -502,8 +516,10 @@ describe('desktop main startup', () => {
     const [about, separator] = submenu
     expect({ menu: [{ label: about!.label, role: about!.role }, separator], options: { ...options, iconPath: '<app icon>' } })
       .toEqual(expected[`${platform}:${locale}`])
+    // A packaged release always reads the shipped icon.png; a development launch reads the artwork
+    // file its own platform ships in resources/.
     expect(options.iconPath).toBe(packaged ? join('desktop-test-resources', 'icon.png')
-      : join('desktop-test-app', 'resources', 'icon-windows.png'))
+      : join('desktop-test-app', 'resources', platform === 'win32' ? 'icon-windows.png' : 'icon.png'))
     if (platform !== 'win32') { expect(about!.click).toBeUndefined(); return }
     // Windows reuses the dimmed update dialog because Electron's fallback is a bare message box.
     harness.dialog.showMessageBox.mockResolvedValueOnce({ response: 0 })
@@ -1176,6 +1192,57 @@ describe('desktop main startup', () => {
     expect(window.show).toHaveBeenCalledOnce()
   })
 
+  it('builds the Linux tray from the panel PNG and hides the window behind it', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    harness.statusNotifierHost.mockReturnValue(true)
+    harness.trayRegistration.resolve(true)
+    const host = await readyWorkspace()
+    const window = harness.windows[0]!
+    expect(harness.trays).toHaveLength(1)
+    expect(harness.trays[0]!.image).toEqual({ path: join('desktop-test-resources', 'tray.png') })
+    expect(harness.registeredItems).toHaveBeenCalledOnce()
+    expect(harness.backgroundNotice.markerPath).toBe(join(harness.app.getPath('userData'), 'background-close-confirmed'))
+    window.close()
+    expect(window.isDestroyed()).toBe(false)
+    expect(window.hide).toHaveBeenCalledOnce()
+    expect(harness.backgroundNotice.close).toHaveBeenCalledOnce()
+    expect(harness.app.quit).not.toHaveBeenCalled()
+    expect(host.stop).not.toHaveBeenCalled()
+  })
+
+  it('drops the Linux tray and quits on close when the watcher never registers it', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    harness.statusNotifierHost.mockReturnValue(true)
+    harness.trayRegistration.resolve(false)
+    const host = await readyWorkspace()
+    const window = harness.windows[0]!
+    expect(harness.trays).toHaveLength(1)
+    expect(harness.trays[0]!.destroy).toHaveBeenCalledOnce()
+    window.close()
+    expect(window.hide).not.toHaveBeenCalled()
+    expect(harness.app.quit).toHaveBeenCalledOnce()
+    await host.stopping.promise
+    host.exited.resolve()
+    await harness.quitCompleted.promise
+  })
+
+  it('quits a Linux window close when the session has no StatusNotifier host', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    const host = await readyWorkspace()
+    const window = harness.windows[0]!
+    expect(harness.statusNotifierHost).toHaveBeenCalledOnce()
+    expect(harness.trays).toHaveLength(0)
+    expect(harness.backgroundNotice.markerPath).toBeUndefined()
+    window.close()
+    expect(window.isDestroyed()).toBe(false)
+    expect(window.hide).not.toHaveBeenCalled()
+    expect(harness.app.quit).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(0)
+    await host.stopping.promise
+    host.exited.resolve()
+    await harness.quitCompleted.promise
+  })
+
   it('skips the confirmation during a macOS shutdown but asks again once a cancelled shutdown returns focus', async () => {
     vi.stubGlobal('process', { ...process, platform: 'darwin', arch: 'arm64', resourcesPath: 'desktop-test-resources' })
     const host = await readyWorkspace()
@@ -1425,6 +1492,20 @@ describe('desktop main startup', () => {
       'x-client-bundle-id': '', 'x-client-platform': 'desktop-win', 'x-client-version': '1.2.3',
       'x-client-arch': 'x64', 'x-client-update-channel': 'nightly', 'x-client-bundled-dsh-version': '1.0.0',
       'x-client-locale': 'en_US', 'x-client-timezone-offset': String(-new Date().getTimezoneOffset() * 60),
+    })
+  })
+
+  it('builds the mandatory-update policy identity for a packaged Linux client', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    harness.embeddedPolicy = { origin: 'https://policy.example.com',
+      allowedPageOrigins: ['https://downloads.example.com'], intervalMs: 10_000, jitter: 0 }
+    const request = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ code: 0,
+      data: { biz_code: 0, biz_data: null } }))
+    vi.stubGlobal('fetch', request)
+    await readyForUpdate()
+    await vi.waitFor(() => { expect(request).toHaveBeenCalledOnce() })
+    expect(request.mock.calls[0]![1]!.headers).toMatchObject({
+      'x-client-platform': 'desktop-linux', 'x-client-arch': 'x64', 'x-client-bundled-dsh-version': '1.0.0',
     })
   })
 
@@ -2062,7 +2143,7 @@ describe('desktop main startup', () => {
     expect(harness.applyRelease).toHaveBeenCalledTimes(1)
     expect(harness.hosts[0]).toMatchObject({
       node: process.execPath,
-      runtime: join(harness.app.getAppPath(), 'dsh'),
+      runtime: join('desktop-test-resources', 'app.asar', 'dsh'),
       primaryRuntime: join('desktop-test-resources', 'runtime', 'primary-runtime'),
       profile: 'desktop-test-profile',
     })
@@ -2088,6 +2169,23 @@ describe('desktop main startup', () => {
     harness.hosts[0]!.ready.resolve()
     await harness.navigated.promise
     expect(harness.dialog.showErrorBox).not.toHaveBeenCalled()
+  })
+
+  it('launches the packaged Host on the payload Node with an unpacked Linux runtime', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    harness.prepared.resolve()
+    await harness.hostStarted.promise
+    const primaryRuntime = join('desktop-test-resources', 'runtime', 'primary-runtime')
+    expect(harness.hosts[0]).toMatchObject({
+      node: join(primaryRuntime, 'dependencies', 'node', 'bin', 'node'),
+      runtime: join('desktop-test-resources', 'app.asar.unpacked', 'dsh'),
+      primaryRuntime,
+      profile: 'desktop-test-profile',
+    })
+    harness.hosts[0]!.ready.resolve()
+    await harness.navigated.promise
   })
 
   it('fails an unpackaged launch that receives no primary runtime directory', async () => {

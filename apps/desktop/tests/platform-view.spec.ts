@@ -149,6 +149,19 @@ it('injects the deployment and client identity headers only at the Platform orig
   manager.close()
 })
 
+it.each(['darwin', 'linux', 'win32'] as const)('reports the %s shell to Platform in x-client-platform', async (platform) => {
+  const owner = Object.assign(new EventEmitter(), {
+    webContents: new EventEmitter(), contentView: { addChildView: vi.fn(), removeChildView: vi.fn() }, isDestroyed: () => false,
+  })
+  const manager = new DesktopPlatformView('/bundled/preload.cjs', () => 'en_US', platform)
+  manager.setSession({ origin: 'https://platform.deepseek.com', userId: null, token: 'fixture-secret' })
+  await manager.open(owner, 'usage', bounds)
+  expect(interceptHeaders(1, 'https://platform.deepseek.com/usage', {})).toMatchObject({
+    'x-client-platform': { darwin: 'desktop-mac', linux: 'desktop-linux', win32: 'desktop-win' }[platform],
+  })
+  manager.close()
+})
+
 it('samples the language and UTC offset on every Platform request', async () => {
   let locale: 'en_US' | 'zh_CN' = 'en_US'
   const owner = Object.assign(new EventEmitter(), {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AccountClientMetadata } from '@deepseek-ai/dsh-deepseek-account/types'
-import { DesktopMandatoryUpdatePolicy, desktopPolicyPage, resolveDesktopPolicyConfig, type DesktopPolicyState } from '../src/mandatory-update-policy.ts'
+import { DesktopMandatoryUpdatePolicy, desktopPolicyPage, resolveDesktopPolicyConfig, type DesktopPolicyIdentity, type DesktopPolicyState } from '../src/mandatory-update-policy.ts'
 
 const identity = { platform: 'win32', arch: 'x64', bundledDshVersion: '0.1.5-rc.1' } as const
 const client: AccountClientMetadata = { version: '1.2.3', locale: 'zh-CN', timezoneOffsetSeconds: 28_800 }
@@ -12,11 +12,11 @@ const deployment = { origin: 'https://policy.example.com', allowedPageOrigins: [
 const instances: DesktopMandatoryUpdatePolicy[] = []
 
 function fixture(authentication: 'anonymous' | 'feishu-test' = 'anonymous',
-  clientSource: () => AccountClientMetadata = () => client) {
+  clientSource: () => AccountClientMetadata = () => client, installed: DesktopPolicyIdentity = identity) {
   const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json(clear))
   const publish = vi.fn<(state: DesktopPolicyState) => void>()
   const policy = new DesktopMandatoryUpdatePolicy(resolveDesktopPolicyConfig({ ...deployment, authentication, ...(authentication === 'feishu-test' ? { allowedAuthOrigins: ['https://login.example.com'] } : {}) })!,
-    identity, publish, request, clientSource)
+    installed, publish, request, clientSource)
   instances.push(policy)
   return { policy, request, publish }
 }
@@ -63,6 +63,16 @@ describe('mandatory update policy', () => {
       'x-client-platform': 'desktop-win', 'x-client-version': '1.2.3', 'x-client-bundle-id': '',
       'x-client-locale': 'zh_CN', 'x-client-timezone-offset': '28800', 'x-client-arch': 'x64', 'x-client-update-channel': 'nightly',
       'x-client-bundled-dsh-version': '0.1.5-rc.1',
+    } })
+  })
+
+  it.each([
+    ['darwin', 'desktop-mac'], ['linux', 'desktop-linux'], ['win32', 'desktop-win'],
+  ] as const)('identifies a packaged %s installation to the policy service', async (platform, reported) => {
+    const { policy, request } = fixture('anonymous', () => client, { ...identity, platform })
+    await expect(policy.check('launch')).resolves.toEqual({ blocking: false, checking: false })
+    expect(request.mock.calls[0]![1]).toMatchObject({ headers: {
+      'x-client-platform': reported, 'x-client-arch': 'x64', 'x-client-bundled-dsh-version': '0.1.5-rc.1',
     } })
   })
 

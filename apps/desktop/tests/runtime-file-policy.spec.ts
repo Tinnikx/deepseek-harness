@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { expect, it } from 'vitest'
 import { desktopRuntimeFileExclusion } from '../scripts/runtime-file-policy.ts'
+import { selectOfficeEngine } from '../../../scripts/libreoffice-packages.mjs'
 import { verifyDesktopRuntime, writeDesktopRuntime } from '../src/runtime-tree.ts'
 import { runtimeFixture } from './runtime-fixture.ts'
 
@@ -83,6 +84,22 @@ it('retains native prebuilds for the selected macOS architecture', () => {
   expect(desktopRuntimeFileExclusion('node-pty/prebuilds/darwin-arm64/pty.node', mac, 'darwin-arm64')).toBeUndefined()
   expect(desktopRuntimeFileExclusion('node-pty/prebuilds/darwin-x64/pty.node', mac, 'darwin-arm64')).toBeDefined()
   expect(desktopRuntimeFileExclusion('node-pty/prebuilds/win32-x64/conpty.node', mac, 'darwin-arm64')).toBeDefined()
+})
+
+it('retains the Linux native prebuild and the Office engine a Linux release selects', () => {
+  const linux = { platform: 'linux' as const, arch: 'x64' }
+  // The published libreoffice-kit declares native engines only for macOS and Windows, so a Linux
+  // Desktop release ships the WASM engine; a future linux-x64 engine would change what it installs.
+  const engines = Object.fromEntries(['darwin-arm64', 'darwin-x64', 'win32-arm64', 'win32-x64', 'wasm']
+    .map(engine => [`@deepseek-ai/libreoffice-kit-${engine}`, '0.1.1']))
+  const officeEngine = selectOfficeEngine({ optionalDependencies: engines }, linux)
+  expect(officeEngine).toBe('wasm')
+  expect(desktopRuntimeFileExclusion('node-pty/prebuilds/linux-x64/pty.node', linux, officeEngine)).toBeUndefined()
+  for (const other of ['win32-x64', 'darwin-arm64', 'linux-arm64']) {
+    expect(desktopRuntimeFileExclusion(`node-pty/prebuilds/${other}/pty.node`, linux, officeEngine)).toBeDefined()
+  }
+  expect(desktopRuntimeFileExclusion('@deepseek-ai/libreoffice-kit-wasm/assets/soffice.data', linux, officeEngine)).toBeUndefined()
+  expect(desktopRuntimeFileExclusion('@deepseek-ai/libreoffice-kit-linux-x64/prebuilds.json', linux, officeEngine)).toBeDefined()
 })
 
 it.each([

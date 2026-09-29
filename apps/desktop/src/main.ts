@@ -26,6 +26,8 @@ import { resolveDesktopPaths } from './paths.ts'
 import { DesktopProjectManager } from './project-manager.ts'
 import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError } from './host-process.ts'
 import { DesktopPlatformView, PLATFORM_IPC, platformBounds } from './platform-view.ts'
+import { desktopHostExecutable } from './host-launcher.ts'
+import { desktopReportedPlatform } from './desktop-platform.ts'
 import { installDesktopDirectoryPicker } from './directory-picker.ts'
 import { installMicrophonePermissions } from './microphone-permissions.ts'
 import { DesktopBackendController } from './backend-controller.ts'
@@ -56,6 +58,7 @@ import { installDesktopShortcuts } from './keyboard.ts'
 import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
+import { hasStatusNotifierHost, readRegisteredStatusNotifierItems, trayRegistrationConfirmed } from './tray-availability.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
 
 let focusPrimaryWindow = (): void => {}
@@ -144,18 +147,25 @@ interface RuntimeResources {
   readonly node: string
   readonly pnpm: string
   readonly dsh: string
+  readonly primaryRuntime: string
 }
 
 function runtimeResources(): RuntimeResources {
   const development = !app.isPackaged
-  const node = process.execPath
+  const primaryRuntime = development
+    ? developmentPrimaryRuntime()
+    : join(process.resourcesPath, 'runtime', 'primary-runtime')
+  const node = desktopHostExecutable(process.execPath, primaryRuntime)
   const nodeBin = development ? join(app.getAppPath(), 'scripts', 'node-bin') : join(process.resourcesPath, 'runtime', 'bin')
   const pnpm = (development ? process.env.DSH_DESKTOP_PNPM_ENTRY : undefined)
     ?? (development ? join(app.getAppPath(), 'node_modules', 'pnpm', 'bin', 'pnpm.mjs')
       : join(process.resourcesPath, 'runtime', 'pnpm', 'bin', 'pnpm.mjs'))
+  // The Linux Host runs on the payload's own Node, which cannot read inside an ASAR archive, so its
+  // dsh tree ships unpacked; macOS and Windows read theirs through Electron's archive-aware fs.
   const dsh = (development ? process.env.DSH_DESKTOP_DSH_DIR : undefined)
-    ?? (development ? join(app.getAppPath(), '.desktop-build', 'development', 'project') : join(app.getAppPath(), 'dsh'))
-  return { node, nodeBin, pnpm, dsh }
+    ?? (development ? join(app.getAppPath(), '.desktop-build', 'development', 'project')
+      : join(process.resourcesPath, process.platform === 'linux' ? 'app.asar.unpacked' : 'app.asar', 'dsh'))
+  return { node, nodeBin, pnpm, dsh, primaryRuntime }
 }
 
 function developmentPrimaryRuntime(): string {
@@ -317,9 +327,7 @@ async function main(): Promise<void> {
   const resources = runtimeResources()
   const paths = resolveDesktopPaths()
   const development = !app.isPackaged
-  const primaryRuntime = development
-    ? developmentPrimaryRuntime()
-    : join(process.resourcesPath, 'runtime', 'primary-runtime')
+  const primaryRuntime = resources.primaryRuntime
   const activeProject = paths.profile
   const manager = new DesktopProjectManager(paths, resources)
   let quitting = false
@@ -415,7 +423,7 @@ async function main(): Promise<void> {
     return next.promise
   }
   const platformView = new DesktopPlatformView(join(app.getAppPath(), 'lib', 'preload-platform-account.cjs'),
-    () => locale.id === 'zh-CN' ? 'zh_CN' : 'en_US', process.platform === 'win32' ? 'win32' : 'darwin')
+    () => locale.id === 'zh-CN' ? 'zh_CN' : 'en_US', desktopReportedPlatform(process.platform) ?? null)
   const backend = new DesktopBackendController((onFailure) => {
     const hostInspectPort = developmentHostInspectPort(development)
     const host = new DesktopHostProcess(resources.node, resources.dsh, activeProject,
@@ -897,7 +905,8 @@ async function main(): Promise<void> {
     updates.dispose()
   })
 
-  const applicationIconPath = development ? join(app.getAppPath(), 'resources', 'icon-windows.png')
+  const applicationIconPath = development
+    ? join(app.getAppPath(), 'resources', process.platform === 'win32' ? 'icon-windows.png' : 'icon.png')
     : join(process.resourcesPath, 'icon.png')
   app.setAboutPanelOptions({
     applicationName: 'DeepSeek Harness',
@@ -954,18 +963,42 @@ async function main(): Promise<void> {
     tray?.relabel()
   }
   refreshApplicationMenu()
-  const trayIconPath = development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
-  if (process.platform === 'win32') {
+  // Windows reads the multi-size ICO so GDI takes the display-scale bitmap; a Linux panel reads one PNG.
+  const windows = process.platform === 'win32'
+  const linux = process.platform === 'linux'
+  const trayIconPath = windows
+    ? (development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico'))
+    : (development ? join(app.getAppPath(), 'resources', 'tray-linux.png') : join(process.resourcesPath, 'tray.png'))
+  // A Linux tray counts as drawn only when the watcher lists an item it did not hold before building it.
+  const registeredItems = linux && hasStatusNotifierHost() ? readRegisteredStatusNotifierItems() : undefined
+  if (windows || (linux && registeredItems !== undefined)) {
     // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
     try {
       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
         open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
     } catch (error) { console.warn('desktop tray: unavailable', error) }
   }
-  const backgroundNotice = process.platform === 'win32'
+  const backgroundNotice = windows || tray !== undefined
     ? new DesktopBackgroundNotice({ markerPath: join(app.getPath('userData'), 'background-close-confirmed'),
       locale: () => locale, show: ordinaryMessageBox, focus: () => { updateDialog.focus() } })
     : undefined
+  // Closing hides only where the desktop offers a visible way back: the macOS Dock or a tray icon the
+  // shell has registered. A Linux close quits until the watcher lists the icon this run built.
+  let hidesWhenClosed = darwin || (tray !== undefined && !linux)
+  if (linux && tray !== undefined && registeredItems !== undefined) {
+    const before = registeredItems
+    void trayRegistrationConfirmed(before).then((drawn) => {
+      if (shuttingDown) return
+      if (drawn) {
+        hidesWhenClosed = true
+        return
+      }
+      // A shell can keep its watcher registered while Electron's item never reaches it, so the icon
+      // goes away with the hiding it would have justified.
+      tray?.dispose()
+      tray = undefined
+    })
+  }
   const quitConfirmation = new DesktopQuitConfirmation({
     locale: () => locale,
     inspect: () => backend.host?.inspectQuit(),
@@ -1046,6 +1079,7 @@ async function main(): Promise<void> {
       if (quitting || shellInstallerOwnsQuit || sessionEnding) return
       event.preventDefault()
       if (updateDialog.isOpen) { updateDialog.focus(); return }
+      if (!hidesWhenClosed) { app.quit(); return }
       const hide = (): void => {
         if (!quitting && !shellInstallerOwnsQuit && !sessionEnding && !window.isDestroyed()) hideMainWindow(window)
       }
@@ -1267,10 +1301,11 @@ async function main(): Promise<void> {
         () => mandatoryUI?.confirmationWindow ?? currentDialogWindow(),
         (event) => { console.info(`desktop policy authentication: ${event}`); updateJournal?.action(`policy-login-${event}`) })
     }
-    if (!['win32', 'darwin'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch)) throw new Error('desktop policy: unsupported platform')
+    const reportedPlatform = desktopReportedPlatform(process.platform)
+    if (reportedPlatform === undefined || !['x64', 'arm64'].includes(process.arch)) throw new Error('desktop policy: unsupported platform')
     let wasBlocking = false
     mandatoryPolicy = new DesktopMandatoryUpdatePolicy(policyConfig, {
-      platform: process.platform as 'win32' | 'darwin', arch: process.arch as 'x64' | 'arm64',
+      platform: reportedPlatform, arch: process.arch as 'x64' | 'arm64',
       bundledDshVersion: app.isPackaged ? readDesktopRuntime(resources.dsh).release.version : app.getVersion(),
     }, (state) => {
       if (state.error !== 'authentication-required') policyAuthenticationQueued = false

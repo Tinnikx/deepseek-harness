@@ -157,7 +157,7 @@ Windows 应用替换遵循[目录安装决策](2026-09-11-windows-directory-inst
 | 桌面 profile | 一个由 Electron 拥有的保留 profile，保存外部插件和共享包链接 |
 | 插件管理 | 共享 Web“插件”页面与 Host 服务，使用启动器提供的内置 pnpm |
 | 激活 | 启用 HMR 时由共享管理器应用配置；否则变更需要重启 |
-| 初始平台 | macOS arm64/x64 与 Windows x64；Linux 尚无受支持的发布目标 |
+| 发布平台 | macOS arm64/x64、Windows x64 与 Linux x64；Linux 发布不签名的 AppImage（[Linux 发布目标](2026-09-28-desktop-linux-release-target.zh.md)） |
 | 更新行为 | 后台检查，差分下载与重启前显式确认，启动时校准 dsh |
 
 ## 风险

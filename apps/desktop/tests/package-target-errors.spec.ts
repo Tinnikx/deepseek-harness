@@ -27,7 +27,10 @@ vi.mock('../scripts/packaging-run.mjs', async (importOriginal) => {
   } }
 })
 
-it.each(['win32', 'darwin'] as const)('records and prints redacted parent failures on %s', async (platform) => {
+const HOST_TARGET = { win32: 'win-x64', darwin: 'mac-x64', linux: 'linux-x64' } as const
+const PACKAGE_STAGE = { win32: 'windows-package', darwin: 'macos-package', linux: 'linux-package' } as const
+
+it.each(['win32', 'darwin', 'linux'] as const)('records and prints redacted parent failures on %s', async (platform) => {
   state.root = await mkdtemp(join(tmpdir(), 'package-errors-'))
   const savedPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!
   const savedArch = Object.getOwnPropertyDescriptor(process, 'arch')!
@@ -39,7 +42,7 @@ it.each(['win32', 'darwin'] as const)('records and prints redacted parent failur
   try {
     Object.defineProperty(process, 'platform', { ...savedPlatform, value: platform })
     Object.defineProperty(process, 'arch', { ...savedArch, value: 'x64' })
-    process.argv = [process.execPath, fileURLToPath(new URL('../scripts/package-target.ts', import.meta.url)), platform === 'win32' ? 'win-x64' : 'mac-x64']
+    process.argv = [process.execPath, fileURLToPath(new URL('../scripts/package-target.ts', import.meta.url)), HOST_TARGET[platform]]
     vi.resetModules()
     await import('../scripts/package-target.ts')
     expect(process.exitCode).toBe(1)
@@ -54,7 +57,7 @@ it.each(['win32', 'darwin'] as const)('records and prints redacted parent failur
       success: false, stages: [
         { stage: 'configuration', success: true },
         { stage: 'toolchain', success: true },
-        { stage: platform === 'win32' ? 'windows-package' : 'macos-package', success: false },
+        { stage: PACKAGE_STAGE[platform], success: false },
       ],
     })
     expect(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR).toBe(savedDirectory)
