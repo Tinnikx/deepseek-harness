@@ -7,9 +7,11 @@ const electron = vi.hoisted(() => ({
   create: vi.fn<(options: unknown) => ReturnType<typeof createWindow>>(),
   root: '/desktop-app',
   handlers: new Map<string, (event: unknown, value?: unknown, attributes?: unknown) => Promise<unknown>>(),
+  iconPublish: vi.fn<(window: unknown) => void>(),
 }))
 vi.mock('electron', () => ({
   app: { getAppPath: () => electron.root },
+  nativeImage: { createFromPath: (path: string) => ({ path, resize: (size: { width: number }) => ({ path, edge: size.width }) }) },
   BrowserWindow: vi.fn(function (options: unknown) { return electron.create(options) }),
   ipcMain: {
     handle: (name: string, handler: (event: unknown, value?: unknown, attributes?: unknown) => Promise<unknown>) => {
@@ -19,6 +21,8 @@ vi.mock('electron', () => ({
     removeHandler: (name: string) => electron.handlers.delete(name),
   },
 }))
+// The icon reaches the window through setIcon, whose platform branch its own spec covers.
+vi.mock('../src/application-icon.ts', () => ({ publishWindowIcon: (window: unknown) => { electron.iconPublish(window) } }))
 
 const { openWelcomeWindow, welcomeWindowOptions } = await import('../src/welcome-window.ts')
 
@@ -37,7 +41,7 @@ function createWindow() {
   }
 }
 
-beforeEach(() => { electron.create.mockReset(); electron.handlers.clear() })
+beforeEach(() => { electron.create.mockReset(); electron.handlers.clear(); electron.iconPublish.mockReset() })
 
 const operations = {
   analyticsEnabled: async () => true,
@@ -82,6 +86,7 @@ describe('desktop welcome window', () => {
     electron.create.mockReturnValue(window)
     const opening = openWelcomeWindow(resolveDesktopLocale('en'), operations)
     expect(window.show).not.toHaveBeenCalled()
+    expect(electron.iconPublish).toHaveBeenCalledWith(window)
     expect(window.loadFile).toHaveBeenCalledWith(join(electron.root, 'renderer', 'welcome.html'))
     expect(window.webContents.setWindowOpenHandler.mock.calls[0]![0]()).toEqual({ action: 'deny' })
     const event = { preventDefault: vi.fn() }

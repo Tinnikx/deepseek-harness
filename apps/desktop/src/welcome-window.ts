@@ -4,6 +4,7 @@ import type { SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, ipcMain, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent } from 'electron'
+import { publishWindowIcon } from './application-icon.ts'
 import type { DesktopLocale } from './locale.ts'
 import { WELCOME_IPC, type WelcomeOperations } from './welcome-api.ts'
 
@@ -59,6 +60,7 @@ let disposeActiveHandlers: (() => void) | undefined
 export async function openWelcomeWindow(locale: DesktopLocale, operations: WelcomeOperations): Promise<BrowserWindow> {
   const options = welcomeWindowOptions(process.platform, locale)
   const window = new BrowserWindow(options)
+  publishWindowIcon(window)
   disposeActiveHandlers?.()
   let active = true
   const disposeHandlers = (): void => {

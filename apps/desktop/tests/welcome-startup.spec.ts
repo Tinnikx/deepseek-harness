@@ -89,6 +89,7 @@ vi.mock('electron', () => ({
     hide = vi.fn()
     show = state.showWorkspace
     showInactive = state.showInactiveWorkspace
+    setIcon = vi.fn()
     async loadURL(url: string) { state.contents = this.webContents; await state.loadWorkspace(url); this.ready?.() }
   },
   WebContentsView: class {
@@ -109,7 +110,7 @@ vi.mock('electron', () => ({
   },
   dialog: { showErrorBox: vi.fn(), showMessageBox: vi.fn() },
   Menu: { buildFromTemplate: state.menu, setApplicationMenu: vi.fn() },
-  nativeImage: { createFromPath: (path: string) => ({ path }) },
+  nativeImage: { createFromPath: (path: string) => ({ path, resize: (size: { width: number }) => ({ path, edge: size.width }) }) },
 }))
 // The Windows tray relabels through Menu as well; keep the menu call counts below platform-neutral.
 vi.mock('../src/tray.ts', () => ({ DesktopTray: class { relabel() {} dispose() {} } }))

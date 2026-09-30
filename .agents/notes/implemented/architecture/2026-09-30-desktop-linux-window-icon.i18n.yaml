@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-09-30-desktop-linux-window-icon.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-30-desktop-linux-window-icon.md
+/agent-note-attach-the-application-icon-to-linux-desktop-windows:
+  en: 90e1b123b71ba050
+  zh: 8363063869720bf8
+/agent-note-attach-the-application-icon-to-linux-desktop-windows/problem:
+  en: a0f64e899bfc5560
+  zh: b4f689f125edf19e
+/agent-note-attach-the-application-icon-to-linux-desktop-windows/decision:
+  en: 54b84b3e27c16e14
+  zh: e8919c4c7590a159
+/agent-note-attach-the-application-icon-to-linux-desktop-windows/alternatives-considered:
+  en: f8215b7a4e0a6cf0
+  zh: 9cafee8330148155
+/agent-note-attach-the-application-icon-to-linux-desktop-windows/consequences:
+  en: 04a185e789c1ad4e
+  zh: 85f7f905d9bcaffb

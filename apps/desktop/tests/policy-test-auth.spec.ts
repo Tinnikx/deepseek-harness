@@ -6,6 +6,8 @@ import type { BrowserWindowConstructorOptions } from 'electron'
 
 const native = vi.hoisted(() => ({ create: vi.fn<(options: BrowserWindowConstructorOptions) => object>(), partition: vi.fn() }))
 vi.mock('electron', () => ({ BrowserWindow: function (options: BrowserWindowConstructorOptions) { return native.create(options) },
+  app: { isPackaged: false, getAppPath: () => '/desktop-test-app' },
+  nativeImage: { createFromPath: (path: string) => ({ path, resize: (size: { width: number }) => ({ path, edge: size.width }) }) },
   session: { fromPartition: native.partition } }))
 
 let auth: DesktopPolicyTestAuth
@@ -26,7 +28,7 @@ function makeWindow() {
   let destroyed = false
   const instance = Object.assign(new EventEmitter(), { webContents: Object.assign(new EventEmitter(), {
     setWindowOpenHandler: vi.fn<(handler: () => { action: string }) => void>(), openDevTools: vi.fn() }),
-  show: vi.fn(), focus: vi.fn(), setMenu: vi.fn(), loadFile: vi.fn(async () => {}),
+  show: vi.fn(), focus: vi.fn(), setMenu: vi.fn(), setIcon: vi.fn(), loadFile: vi.fn(async () => {}),
   loadURL: vi.fn(async () => {}), isDestroyed: () => destroyed,
   destroy: () => { if (!destroyed) { destroyed = true; instance.emit('closed') } } })
   return instance

@@ -88,6 +88,7 @@ const harness = await vi.hoisted(async () => {
     readonly shown = deferred()
     readonly show = vi.fn(() => { this.shown.resolve() })
     readonly hide = vi.fn()
+    readonly setIcon = vi.fn()
     readonly focus = vi.fn()
     readonly moveTop = vi.fn()
     readonly setAlwaysOnTop = vi.fn()
@@ -319,7 +320,7 @@ vi.mock('electron', () => ({
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: harness.protocolHandle },
   powerMonitor: harness.powerMonitor,
   Tray: harness.FakeTray,
-  nativeImage: { createFromPath: (path: string) => ({ path }) },
+  nativeImage: { createFromPath: (path: string) => ({ path, resize: (size: { width: number }) => ({ path, edge: size.width }) }) },
 }))
 vi.mock('../src/background-notice.ts', () => ({ DesktopBackgroundNotice: class {
   constructor(options: { markerPath: string }) { harness.backgroundNotice.markerPath = options.markerPath }
@@ -516,6 +517,16 @@ describe('desktop main startup', () => {
       { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
     ])
     expect(harness.windows[0]!.options).toMatchObject({ webPreferences: { devTools: true } })
+  })
+
+  it('publishes the window icon a Linux session reads', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux', arch: 'x64', resourcesPath: 'desktop-test-resources' })
+    harness.app.isPackaged = false
+    await readyWorkspace()
+    // The icon option never reaches a window created hidden, which is how every product window starts.
+    expect(harness.windows[0]!.setIcon).toHaveBeenCalledWith({
+      path: join('desktop-test-app', 'resources', 'icon.png'), edge: 256,
+    })
   })
 
   it.each([
@@ -1155,7 +1166,7 @@ describe('desktop main startup', () => {
     const host = await readyWorkspace()
     const window = harness.windows[0]!
     expect(harness.trays).toHaveLength(1)
-    expect(harness.trays[0]!.image).toEqual({ path: join('desktop-test-resources', 'tray.ico') })
+    expect(harness.trays[0]!.image).toMatchObject({ path: join('desktop-test-resources', 'tray.ico') })
     expect(harness.backgroundNotice.markerPath).toBe(join(harness.app.getPath('userData'), 'background-close-confirmed'))
     window.show.mockClear()
     window.close()
@@ -1222,7 +1233,8 @@ describe('desktop main startup', () => {
     const host = await readyWorkspace()
     const window = harness.windows[0]!
     expect(harness.trays).toHaveLength(1)
-    expect(harness.trays[0]!.image).toEqual({ path: join('desktop-test-resources', 'tray.png') })
+    // The fake image carries the scaling the window icon asks for; the tray reads it unscaled.
+    expect(harness.trays[0]!.image).toMatchObject({ path: join('desktop-test-resources', 'tray.png') })
     expect(harness.registeredItems).toHaveBeenCalledOnce()
     expect(harness.backgroundNotice.markerPath).toBe(join(harness.app.getPath('userData'), 'background-close-confirmed'))
     window.close()

@@ -1,6 +1,7 @@
 /** Isolated, process-lifetime Feishu cookies for explicitly configured test policy requests. */
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, session } from 'electron'
+import { publishWindowIcon } from './application-icon.ts'
 import type { DesktopLocale } from './locale.ts'
 
 /** Packaged placeholder document; it is the window's first document and needs no network. */
@@ -74,6 +75,7 @@ export class DesktopPolicyTestAuth {
       title: this.locale.messages.policyLoginTitle, autoHideMenuBar: true,
       webPreferences: { session: this.browserSession, nodeIntegration: false, contextIsolation: true,
         sandbox: true, webSecurity: true, webviewTag: false, devTools: true, spellcheck: false } })
+    publishWindowIcon(window)
     this.pending = result.promise
     this.window = window
     let settled = false

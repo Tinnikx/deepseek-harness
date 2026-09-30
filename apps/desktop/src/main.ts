@@ -38,6 +38,7 @@ import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } fro
 import { readDeviceInfo } from './device-info.ts'
 import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
 import { claimDesktopSingleInstance } from './single-instance.ts'
+import { applicationIconPath, publishWindowIcon } from './application-icon.ts'
 import { DesktopUpdateCoordinator } from './update-coordinator.ts'
 import { serveWebDocument, authenticateWebHost, forwardWebRequest } from './web-document.ts'
 import { DesktopFatalRecovery } from './fatal-recovery.ts'
@@ -251,6 +252,7 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
       ...(process.platform === 'linux' ? { backgroundThrottling: false } : {}),
     },
   })
+  publishWindowIcon(window)
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
     return { action: 'deny' }
@@ -932,16 +934,13 @@ async function main(): Promise<void> {
     updates.dispose()
   })
 
-  const applicationIconPath = development
-    ? join(app.getAppPath(), 'resources', process.platform === 'win32' ? 'icon-windows.png' : 'icon.png')
-    : join(process.resourcesPath, 'icon.png')
   app.setAboutPanelOptions({
     applicationName: 'DeepSeek Harness',
     applicationVersion: app.getVersion(),
     // The release has no separate build number; omit Electron's bundle version.
     version: '',
     copyright: '',
-    iconPath: applicationIconPath,
+    iconPath: applicationIconPath(),
   })
   // A custom application menu replaces Electron's default menu, so macOS needs
   // its standard menus and application hide commands declared explicitly.
