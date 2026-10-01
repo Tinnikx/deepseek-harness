@@ -241,7 +241,7 @@ export async function createDesktopUploadPlan(
   const updaterPath = await verifyChecksummedArtifact(artifactsRoot, updaterInfo)
   const artifacts: DesktopUploadArtifact[] = []
   const binaryPrefix = update.binaryKeyPrefix
-  let installerArtifact: DesktopUploadArtifact
+  let installerArtifact: DesktopUploadArtifact | undefined
 
   if (target.platform === 'darwin') {
     const dmgPath = await requireArtifact(artifactsRoot, `${base}.dmg`)
@@ -284,17 +284,36 @@ export async function createDesktopUploadPlan(
     const stableFilename = metadataFilename.replace('nightly', 'latest')
     artifacts.push({ ...channelArtifact, filename: stableFilename, key: `${update.keyPrefix}/${stableFilename}` })
   }
-  const latestFilename = `dsh-latest-${target.platform === 'darwin' ? 'macos' : 'windows'}-${target.arch}.${target.platform === 'darwin' ? 'dmg' : 'exe'}`
-  const latestKey = `desktop/${latestFilename}`
+  // `options.latest` replaces the fixed installer object, and Linux releases publish an AppImage without a
+  // separate installer artifact, so a fixed-installer request is only valid where one exists.
+  if (options.latest) {
+    if (installerArtifact === undefined) {
+      throw new Error(`desktop upload: ${targetName} publishes no fixed installer object; remove --latest`)
+    }
+    const latestFilename = `dsh-latest-${target.platform === 'darwin' ? 'macos' : 'windows'}-${target.arch}.${target.platform === 'darwin' ? 'dmg' : 'exe'}`
+    const latestKey = `desktop/${latestFilename}`
+    return {
+      environment: update.environment,
+      target: targetName,
+      version: buildVersion,
+      publicUrl: `${update.origin}/${latestKey}`,
+      bucket: update.bucket,
+      secretIdEnvName: update.secretIdEnvName,
+      secretKeyEnvName: update.secretKeyEnvName,
+      artifacts: [{ ...installerArtifact, filename: latestFilename, key: latestKey }],
+      ...typeof buildRecord.commit === 'string' ? { commit: buildRecord.commit } : {},
+      ...typeof buildRecord.dirty === 'boolean' ? { dirty: buildRecord.dirty } : {},
+    }
+  }
   return {
     environment: update.environment,
     target: targetName,
     version: buildVersion,
-    publicUrl: options.latest ? `${update.origin}/${latestKey}` : update.publicUrl,
+    publicUrl: update.publicUrl,
     bucket: update.bucket,
     secretIdEnvName: update.secretIdEnvName,
     secretKeyEnvName: update.secretKeyEnvName,
-    artifacts: options.latest ? [{ ...installerArtifact, filename: latestFilename, key: latestKey }] : artifacts,
+    artifacts,
     ...typeof buildRecord.commit === 'string' ? { commit: buildRecord.commit } : {},
     ...typeof buildRecord.dirty === 'boolean' ? { dirty: buildRecord.dirty } : {},
   }

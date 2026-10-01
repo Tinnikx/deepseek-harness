@@ -169,6 +169,12 @@ describe('desktop upload plan', () => {
     })
   })
 
+  it('rejects a latest upload for Linux because it publishes no fixed installer object', async () => {
+    const paths = await fixture('linux-x64', '1.2.3', 'production')
+    await expect(createDesktopUploadPlan('linux-x64', { ...paths, latest: true }))
+      .rejects.toThrow('desktop upload: linux-x64 publishes no fixed installer object; remove --latest')
+  })
+
   it.each(['completion', 'deployment', 'checksum'] as const)('rejects invalid %s before planning a latest upload', async (failure) => {
     const paths = await fixture('win-x64', '1.2.3', 'production')
     if (failure === 'completion') await rm(join(paths.artifactsRoot, 'win-x64-release.json'))
