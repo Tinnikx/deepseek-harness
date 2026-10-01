@@ -3,7 +3,10 @@ import { expect, it } from 'vitest'
 import { platformClientHeaders } from '../src/index.ts'
 
 it.each([
-  ['darwin', 'desktop-mac'], ['linux', 'desktop-linux'], ['win32', 'desktop-win'], [null, 'web'],
+  // Platform validates this header only while exchanging the authorization code, where an
+  // unrecognized value fails sign-in after the browser already completed it, so a Linux
+  // client reports the same accepted value macOS does until Platform names a Linux one.
+  ['darwin', 'desktop-mac'], ['linux', 'desktop-mac'], ['win32', 'desktop-win'], [null, 'web'],
 ] as const)('maps %s to %s and leaves the bundle ID empty', (platform, expected) => {
   expect(platformClientHeaders(platform, { version: '1.2.3', locale: 'zh-CN', timezoneOffsetSeconds: 28_800 })).toEqual({
     'x-client-bundle-id': '', 'x-client-platform': expected, 'x-client-version': '1.2.3',

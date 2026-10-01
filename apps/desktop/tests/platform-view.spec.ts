@@ -157,7 +157,7 @@ it.each(['darwin', 'linux', 'win32'] as const)('reports the %s shell to Platform
   manager.setSession({ origin: 'https://platform.deepseek.com', userId: null, token: 'fixture-secret' })
   await manager.open(owner, 'usage', bounds)
   expect(interceptHeaders(1, 'https://platform.deepseek.com/usage', {})).toMatchObject({
-    'x-client-platform': { darwin: 'desktop-mac', linux: 'desktop-linux', win32: 'desktop-win' }[platform],
+    'x-client-platform': { darwin: 'desktop-mac', linux: 'desktop-mac', win32: 'desktop-win' }[platform],
   })
   manager.close()
 })

@@ -135,8 +135,17 @@ export function mergePlatformCookies(base: string, override: string): string {
   return [...cookies].map(([name, value]) => `${name}=${value}`).join('; ')
 }
 
-/** `x-client-platform` value per native desktop operating system. */
-const DESKTOP_CLIENT_PLATFORM = { darwin: 'desktop-mac', linux: 'desktop-linux', win32: 'desktop-win' } as const
+/**
+ * `x-client-platform` value per native desktop operating system.
+ *
+ * Platform validates this header against a closed enumeration in the code
+ * exchange, so a Linux build reports `desktop-mac` here rather than a value of
+ * its own: an unrecognized value is rejected there with an HTTP 422 naming
+ * this header, which fails sign-in after the browser has already completed it.
+ * The Platform account read endpoints do not check the header, but signing in
+ * does, so the honest label is not available to this client yet.
+ */
+const DESKTOP_CLIENT_PLATFORM = { darwin: 'desktop-mac', linux: 'desktop-mac', win32: 'desktop-win' } as const
 
 /**
  * Identify native desktop API requests; null leaves non-desktop requests unchanged.

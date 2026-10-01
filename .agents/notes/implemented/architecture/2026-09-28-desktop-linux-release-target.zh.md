@@ -18,7 +18,7 @@ Status: implemented
 
 electron-builder 把 AppImage 的差量更新 blockmap 内嵌在产物里，所以 Linux 发布只上传一个二进制对象，而 macOS 和 Windows 各自上传更新载荷外加独立的 `.blockmap`。更新器就地替换 AppImage，这要求安装直接从 `.AppImage` 文件启动；`--appimage-extract-and-run` 不会留下可供替换的文件。Linux 打包因此不需要任何签名或公证配置，`.env.linux` 只接受共有的发布字段——混进来的 macOS 或 Windows 字段会被拒绝而不是忽略。electron-builder 自行下载 AppImage 工具集，构建主机不需要 squashfs 工具，工具链预检也不增加 Linux 探测项。
 
-出厂的 Linux 应用如实标识自己。强更策略接受 `linux`，并按与其他平台相同的方式上报安装平台与架构；内嵌的 Platform 账户视图和 Host 账户插件发送 `x-client-platform: desktop-linux`，出厂清单携带 `desktopName`，使 Electron 的 Linux 窗口类与 electron-builder 写出的 `.desktop` 条目一致。
+出厂的 Linux 应用在线路格式有名字可用的地方如实标识自己。强更策略接受 `linux`，并按与其他平台相同的方式上报安装平台与架构；出厂清单携带 `desktopName`，使 Electron 的 Linux 窗口类与 electron-builder 写出的 `.desktop` 条目一致。它暂时还无法如实上报的标识是 Platform 客户端身份：Linux 安装发送 `x-client-platform: desktop-mac`，因为 Platform 在该请求头上对照 `web`、`desktop-mac` 和 `desktop-win` 这个封闭枚举校验，并拒绝其他一切取值。
 
 dsh Host 是 Node 子进程，Linux 上它的启动器是载荷自带的 Node：Electron 向进程贡献一份 GLib，sharp 捆绑的 libvips 又绑定另一份，图片解码在工作线程上直接段错误，而同一载荷在那个 Node 下解码正常。macOS 与 Windows 继续用 Node 模式的 Electron。运行时准备与出厂包冒烟都用出厂应用实际使用的可执行文件启动 Host，因此这一平台差异不可能未经测试就发布。该 Node 不读取任何 ASAR 归档，所以 Linux 包把 dsh 树解包放在 `resources/app.asar.unpacked/dsh`；electron-builder 在 Linux 上的架构拼写（`x86_64`）由显式产物名覆盖，使每个发布对象都沿用更新源与上传路径使用的 `linux-x64` 目标名。
 
@@ -36,12 +36,12 @@ Linux 上关闭主窗口只有在托盘图标真的被绘制出来时才隐藏�
 
 **只相信 watcher 的名字。** 一次 `NameHasOwner` 回答曾在这里是最初的规则，前提假定是拥有 watcher 的 shell 会绘制任何向它注册的条目。KDE Plasma 6 会回答那次查询，却仍然不把 Electron 的条目列出来，结果就是把窗口藏到一个没人看得见的图标后面。回读已注册列表只多花几次启动时的会话总线读取，而且只在 watcher 已经存在的场合运行。
 
-**把 Linux shell 报成 `desktop-mac`。** 沿用旧的误标不需要改动契约，分析会继续把 Linux 会话计入 Mac。`desktop-linux` 是 `x-client-platform` 请求头上 Platform 服务尚未确认的新取值；若 Platform 拒绝该值，请求头取值回退，本段记录这一结果。
+**把 Linux shell 报成 `desktop-mac`。** 沿用旧的误标不需要改动契约，分析会继续把 Linux 会话计入 Mac。`desktop-linux` 当时是 `x-client-platform` 请求头上 Platform 服务尚未确认的新取值，本记录为这次拒绝预留的应对方案正是最终交付的那个：Platform 在该请求头上只接受 `web`、`desktop-mac` 和 `desktop-win`。它的校验是不对称的，而这正是这次拒绝表现为登录失败而不是启动时明显报错的原因——`auth_init` 不校验该请求头，所以 Linux 客户端能打开可用的登录页并在浏览器里完成它，随后 `auth_exchange` 才返回 HTTP 422，并在错误里点名 `header.x-client-platform`。Host 把这个读作协议失败，欢迎窗口于是报告一次无法完成的登录——而人其实已经登录成功了。发送平台接受的取值，可以让登录、内嵌 Platform 视图和强更策略统一到一个身份上；代价是，在 Platform 给出属于它的 Linux 取值之前，Platform 自己的分析会把 Linux 会话计入 macOS。受影响的只有这个请求头：`auth_init`、`/dsh/authorize` 文档、账户读取接口和 `auth_cancel` 都接受无法识别的取值，`device_model` 与 `os_version` 请求体字段也不校验，因此 Linux 请求形状的其余部分不必改动。
 
 **掩盖 About 面板图标的平台差异。** 打包的 `resources/icon.png` 在所有平台都是 Windows 磁贴美术，而 Linux 与 macOS 不同，会在自己的 About 面板里绘制它。给 Linux 放原画，既保证可见标识正确，又不改动 macOS 与 Windows 被归档完整性校验钉住的产物字节。
 
 ## Consequences
 
-Linux 用户得到能自我更新的单文件发布、如实的客户端标识，以及在其桌面环境支持时的关闭即后台行为。仓库在六份枚举里多出第四个发布目标、多一份 dotenv 文件、多一条产物通道，并且原先只在 Windows 使用的托盘代码现在由两个可用性不同的平台共享。
+Linux 用户得到能自我更新的单文件发布、在线路格式有名字可用处如实的客户端标识，以及在其桌面环境支持时的关闭即后台行为。仓库在六份枚举里多出第四个发布目标、多一份 dotenv 文件、多一条产物通道，并且原先只在 Windows 使用的托盘代码现在由两个可用性不同的平台共享。
 
-代价：Linux 发布无法签名或公证，首次运行依赖用户自己的下载完整性校验而不是平台签名；发布范围保证仅限 x64；`desktop-linux` 仍待 Platform 服务确认；AppImage 的自动更新只有在安装就地从 AppImage 文件运行时才成立。Linux 托盘及其首次隐藏确认是用户可感知的，因此即便面板图标复用既有美术而非新字形，发布前仍需设计复核。验证一次 Linux 发布仍需发布操作者执行真实的 COS 上传和一次跨版本更新，因为在没有已发布对象的情况下，更新源和差量下载都无法预演。
+代价：Linux 发布无法签名或公证，首次运行依赖用户自己的下载完整性校验而不是平台签名；发布范围保证仅限 x64；Platform 没有 `desktop-linux` 取值，因此 Linux 安装在 `x-client-platform` 上把自己报成 `desktop-mac`，在 Platform 给出 Linux 取值之前，其分析会把这些会话计入 macOS；AppImage 的自动更新只有在安装就地从 AppImage 文件运行时才成立。Linux 托盘及其首次隐藏确认是用户可感知的，因此即便面板图标复用既有美术而非新字形，发布前仍需设计复核。验证一次 Linux 发布仍需发布操作者执行真实的 COS 上传和一次跨版本更新，因为在没有已发布对象的情况下，更新源和差量下载都无法预演。

@@ -1552,7 +1552,7 @@ describe('desktop main startup', () => {
     await readyForUpdate()
     await vi.waitFor(() => { expect(request).toHaveBeenCalledOnce() })
     expect(request.mock.calls[0]![1]!.headers).toMatchObject({
-      'x-client-platform': 'desktop-linux', 'x-client-arch': 'x64', 'x-client-bundled-dsh-version': '1.0.0',
+      'x-client-platform': 'desktop-mac', 'x-client-arch': 'x64', 'x-client-bundled-dsh-version': '1.0.0',
     })
   })
 

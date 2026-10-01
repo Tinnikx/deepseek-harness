@@ -67,7 +67,7 @@ describe('mandatory update policy', () => {
   })
 
   it.each([
-    ['darwin', 'desktop-mac'], ['linux', 'desktop-linux'], ['win32', 'desktop-win'],
+    ['darwin', 'desktop-mac'], ['linux', 'desktop-mac'], ['win32', 'desktop-win'],
   ] as const)('identifies a packaged %s installation to the policy service', async (platform, reported) => {
     const { policy, request } = fixture('anonymous', () => client, { ...identity, platform })
     await expect(policy.check('launch')).resolves.toEqual({ blocking: false, checking: false })
