@@ -4,11 +4,11 @@ Status: implemented
 
 [English](2026-09-29-desktop-linux-boot-cover.md) | 中文
 
-macOS 与 Windows 的窗口时机仍由 [立即开窗决策](2026-09-09-desktop-immediate-window-and-direct-start.zh.md) 管辖；本记录就 Linux 部分部分取代它——Linux 上窗口在启动过程中就出现，而不是启动完成后。关闭即后台的行为沿用 [关闭时隐藏 Desktop 窗口](2026-09-23-desktop-close-to-background-and-quit-confirmation.zh.md)，本改动发布进 Linux 打包的方式遵循 [Linux 发布目标](2026-09-28-desktop-linux-release-target.zh.md)。
+macOS 与 Windows 的窗口时机仍由 [已归档的立即开窗决策](../../archived/architecture/2026-09-09-desktop-immediate-window-and-direct-start.md) 管辖；本记录就 Linux 部分部分取代它——Linux 上窗口在启动过程中就出现，而不是启动完成后。关闭即后台的行为沿用 [关闭时隐藏 Desktop 窗口](2026-09-23-desktop-close-to-background-and-quit-confirmation.zh.md)，本改动发布进 Linux 打包的方式遵循 [Linux 发布目标](2026-09-28-desktop-linux-release-target.zh.md)。
 
 ## 问题
 
-冷启动的 Linux Desktop 在 Host 进程报告就绪之前不给用户任何可见界面：`createMainWindow` 以隐藏方式建窗，只有 `enterWorkspace` 或欢迎窗口才会显示它，而这可能在启动数秒之后。[立即开窗决策](2026-09-09-desktop-immediate-window-and-direct-start.zh.md) 选择了在 Host 就绪前展示加载页，但实际落地的时机在三平台上都把窗口留在屏幕外，而它承诺的加载页（页内 `BootPage`）只有窗口可见时才可见。
+冷启动的 Linux Desktop 在 Host 进程报告就绪之前不给用户任何可见界面：`createMainWindow` 以隐藏方式建窗，只有 `enterWorkspace` 或欢迎窗口才会显示它，而这可能在启动数秒之后。[已归档的立即开窗决策](../../archived/architecture/2026-09-09-desktop-immediate-window-and-direct-start.md) 选择了在 Host 就绪前展示加载页，但实际落地的时机在三平台上都把窗口留在屏幕外，而它承诺的加载页（页内 `BootPage`）只有窗口可见时才可见。
 
 单纯提前显示窗口会在两处失败。应用文档从 `dsh-app://app/` 加载，其非静态路由在 Host 存在前一律回答 503，而主题背景要等客户端插件挂载之后才到达，所以提前的窗口会闪出一个无色底矩形。盖层也不能住在页面里：前端启动会占满页面自己的主线程，页内 spinner 恰好在它存在的那几秒丢帧，而且页内盖层遮不住页面自己的无色底首帧。
 

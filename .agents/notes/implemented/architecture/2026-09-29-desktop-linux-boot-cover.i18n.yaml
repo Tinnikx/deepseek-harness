@@ -3,11 +3,11 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-29-desktop-linux-boot-cover.md
 /agent-note-reveal-the-linux-desktop-window-behind-an-animated-boot-cover:
-  en: 4a4129a01c6a184c
-  zh: 909b38c7c5f205e4
+  en: c5984617ef8aa320
+  zh: 8a62819ea1e0441b
 /agent-note-reveal-the-linux-desktop-window-behind-an-animated-boot-cover/problem:
-  en: 80617c8cd231b2bd
-  zh: d0ec6003eee273ea
+  en: ab36b6877aa98abd
+  zh: 0012119ac38464df
 /agent-note-reveal-the-linux-desktop-window-behind-an-animated-boot-cover/decision:
   en: 299ee072d8bbf65c
   zh: eabf48b6b220606c
