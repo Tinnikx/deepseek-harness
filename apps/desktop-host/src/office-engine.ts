@@ -15,6 +15,23 @@ export function runtimeArchivePath(runtimeDir: string): string | undefined {
 }
 
 /**
+ * Locate the resources directory holding a packaged runtime and its sibling support files.
+ *
+ * macOS and Windows read the payload through Electron's archive-aware filesystem, so it keeps its
+ * `app.asar` directory. The Linux Host runs on the payload's own Node, which cannot read inside an
+ * archive, so that release ships the same tree unpacked as a sibling `app.asar.unpacked` directory.
+ * Both layouts place the payload two levels below the resources root.
+ * @param runtimeDir - Prepared or packaged runtime directory.
+ * @returns Resource directory, or undefined for a prepared directory outside an application.
+ */
+export function runtimeResourcesPath(runtimeDir: string): string | undefined {
+  const archive = runtimeArchivePath(runtimeDir)
+  if (archive !== undefined) return dirname(archive)
+  const parent = dirname(runtimeDir)
+  return basename(parent) === 'app.asar.unpacked' ? dirname(parent) : undefined
+}
+
+/**
  * Keep engine executable and resource paths usable by native child processes outside Electron.
  * Hooks apply only to this thread; worker threads must install their own resolver.
  * @param runtimeDir - Prepared or ASAR-contained dsh runtime directory.

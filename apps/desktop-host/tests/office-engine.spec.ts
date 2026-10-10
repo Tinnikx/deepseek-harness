@@ -3,7 +3,7 @@ import { createRequire, type ModuleHooks } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { installOfficeEngineResolution } from '../src/office-engine.ts'
+import { installOfficeEngineResolution, runtimeArchivePath, runtimeResourcesPath } from '../src/office-engine.ts'
 import { PackageManifests } from '../../../packages/boot/hmr/src/package-manifest.ts'
 
 const roots: string[] = []
@@ -136,4 +136,24 @@ it('leaves external engines and the archived WASM engine at their own locations'
     .toMatchObject({ path: realpathSync(dirname(external)) })
   expect(f.require('@deepseek-ai/libreoffice-kit-wasm/package.json'))
     .toMatchObject({ path: realpathSync(dirname(wasm)) })
+})
+
+// macOS and Windows read the payload through Electron's archive-aware filesystem and keep it inside
+// `app.asar`. The Linux Host runs on the payload's own Node, which cannot read inside an archive, so
+// that release ships the tree unpacked; both layouts still sit beside the same `resources` directory
+// that carries `runtime`, so the CLI finds its pnpm and Node launchers in either one.
+it.each([
+  ['app.asar', true],
+  ['app.asar.unpacked', false],
+] as const)('resolves the resources directory beside a %s payload', (archive, archived) => {
+  const resources = join('/opt', 'DeepSeek Harness', 'resources')
+  const runtime = join(resources, archive, 'dsh')
+  expect(runtimeResourcesPath(runtime)).toBe(resources)
+  // Only the ASAR layout still has an archive to verify; the unpacked tree is verified directly.
+  expect(runtimeArchivePath(runtime)).toBe(archived ? join(resources, 'app.asar') : undefined)
+})
+
+it('reports no application resources for a prepared runtime outside one', () => {
+  expect(runtimeResourcesPath(join('/srv', 'prepared', 'dsh'))).toBeUndefined()
+  expect(runtimeArchivePath(join('/srv', 'prepared', 'dsh'))).toBeUndefined()
 })

@@ -13,7 +13,8 @@ const { values } = parseArgs({ options: { unsigned: { type: 'boolean', default: 
 const target = resolveDesktopBuildTarget()
 const windows = target === 'win-x64'
 const linux = target === 'linux-x64'
-if (values.unsigned && !windows) throw new Error('desktop smoke: unsigned artifacts require Windows')
+// macOS unsigned artifacts now exist too, so the signed-artifact smoke is the Windows-only case.
+if (values.unsigned && !windows && !linux) throw new Error('desktop smoke: unsigned artifacts require Windows or Linux')
 const artifacts = values.unsigned ? paths.unsignedArtifacts : paths.artifacts
 const application = windows ? join(artifacts, 'win-unpacked')
   : linux ? join(artifacts, 'linux-unpacked')
