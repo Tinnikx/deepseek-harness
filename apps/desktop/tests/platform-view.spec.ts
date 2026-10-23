@@ -46,13 +46,14 @@ afterEach(() => {
   vi.clearAllMocks(); vi.unstubAllEnvs()
 })
 function setup() {
+  let blocked = false
   const removeChildView = vi.fn()
   const owner = Object.assign(new EventEmitter(), {
     webContents: new EventEmitter(), contentView: { addChildView: vi.fn(), removeChildView }, isDestroyed: () => false,
   })
-  const manager = new DesktopPlatformView('/bundled/preload.cjs', () => 'en_US', 'darwin')
+  const manager = new DesktopPlatformView('/bundled/preload.cjs', () => 'en_US', 'darwin', () => blocked)
   manager.setSession({ origin: 'https://platform.deepseek.com', userId: 'fixture-user' as AccountUserId, token: 'fixture-secret' })
-  return { manager, owner, removeChildView }
+  return { manager, owner, removeChildView, block: () => { blocked = true } }
 }
 
 /** Invoke the first registered header interceptor for one request. */
@@ -153,7 +154,7 @@ it.each(['darwin', 'linux', 'win32'] as const)('reports the %s shell to Platform
   const owner = Object.assign(new EventEmitter(), {
     webContents: new EventEmitter(), contentView: { addChildView: vi.fn(), removeChildView: vi.fn() }, isDestroyed: () => false,
   })
-  const manager = new DesktopPlatformView('/bundled/preload.cjs', () => 'en_US', platform)
+  const manager = new DesktopPlatformView('/bundled/preload.cjs', () => 'en_US', platform, () => false)
   manager.setSession({ origin: 'https://platform.deepseek.com', userId: null, token: 'fixture-secret' })
   await manager.open(owner, 'usage', bounds)
   expect(interceptHeaders(1, 'https://platform.deepseek.com/usage', {})).toMatchObject({
@@ -167,7 +168,7 @@ it('samples the language and UTC offset on every Platform request', async () => 
   const owner = Object.assign(new EventEmitter(), {
     webContents: new EventEmitter(), contentView: { addChildView: vi.fn(), removeChildView: vi.fn() }, isDestroyed: () => false,
   })
-  const manager = new DesktopPlatformView('/bundled/preload.cjs', () => locale, 'darwin')
+  const manager = new DesktopPlatformView('/bundled/preload.cjs', () => locale, 'darwin', () => false)
   manager.setSession({ origin: 'https://platform.deepseek.com', userId: null, token: 'fixture-secret' })
   await manager.open(owner, 'usage', bounds)
   const offset = vi.spyOn(Date.prototype, 'getTimezoneOffset').mockReturnValue(480)
@@ -327,7 +328,7 @@ it('does not reveal a pending view after the owner reloads or remove a replaceme
 it('bootstraps the current language and updates an open view without reloading', async () => {
   const { owner } = setup()
   let locale: 'en_US' | 'zh_CN' = 'zh_CN'
-  const manager = new DesktopPlatformView('/bundled/preload.cjs', () => locale, 'win32')
+  const manager = new DesktopPlatformView('/bundled/preload.cjs', () => locale, 'win32', () => false)
   manager.setSession({ origin: 'https://platform.deepseek.com', userId: 'fixture-user' as AccountUserId, token: 'fixture-secret' })
   manager.notifyLocaleChanged()
   await manager.open(owner, 'usage', bounds)
@@ -502,4 +503,26 @@ it('keeps an open temporary document when its credential gains a stable identity
   await manager.open(owner, 'usage', bounds)
   expect(browserSession().partition).toMatch(/^persist:/)
   await manager.dispose()
+})
+
+
+it('refuses Platform admission while an update prompt is blocking', async () => {
+  const f = setup()
+  f.block()
+  await expect(f.manager.open(f.owner, 'usage', { x: 0, y: 0, width: 400, height: 300 })).rejects.toThrow(/blocked/)
+  expect(state.views).toHaveLength(0)
+  expect(state.sessions).toHaveLength(0)
+  await f.manager.dispose()
+})
+
+it('refuses a pending Platform view if update blocking starts during storage cleanup', async () => {
+  const f = setup()
+  const pending = f.manager.open(f.owner, 'usage', { x: 0, y: 0, width: 400, height: 300 })
+  expect(state.sessions).toHaveLength(1)
+  f.block()
+  await expect(pending).rejects.toThrow(/blocked/)
+  expect(state.views).toHaveLength(0)
+  expect(f.owner.contentView.addChildView).not.toHaveBeenCalled()
+  expect(f.owner.listenerCount('closed')).toBe(0)
+  await f.manager.dispose()
 })
