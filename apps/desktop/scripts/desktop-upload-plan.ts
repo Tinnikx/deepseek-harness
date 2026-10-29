@@ -8,6 +8,7 @@ import { dump, load } from 'js-yaml'
 import type { DesktopPackageTargetName } from './package-target.ts'
 import {
   desktopBuildRecordFilename,
+  desktopLatestInstallerFilename,
   desktopUpdateMetadataFilename,
   resolveDesktopUploadConfig,
 } from './desktop-auto-update-environment.mjs'
@@ -289,7 +290,7 @@ export async function createDesktopUploadPlan(
     if (installerArtifact === undefined) {
       throw new Error(`desktop upload: ${targetName} publishes no fixed installer object; remove --latest`)
     }
-    const latestFilename = `dsh-latest-${target.platform === 'darwin' ? 'macos' : 'windows'}-${target.arch}.${target.platform === 'darwin' ? 'dmg' : 'exe'}`
+    const latestFilename = desktopLatestInstallerFilename(targetName)
     const latestKey = `desktop/${latestFilename}`
     return {
       environment: update.environment,
