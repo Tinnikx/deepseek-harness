@@ -33,7 +33,7 @@ async function fixture(
   inferenceOrigin = 'https://api.deepseek.com',
   beforeAccount?: (ctx: Context, origin: string) => Promise<void>,
   embeddedPageDist = '',
-  desktopPlatform: 'darwin' | 'win32' | null = null,
+  desktopPlatform: 'darwin' | 'linux' | 'win32' | null = null,
   balanceTimeoutMs = 30_000,
 ) {
   const home = await mkdtemp(join(tmpdir(), 'dsh-account-'))
