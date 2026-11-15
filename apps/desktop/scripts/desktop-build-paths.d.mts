@@ -1,4 +1,4 @@
-import type { DesktopAutoUpdateTarget } from './desktop-auto-update-environment.mjs'
+import type { DesktopAutoUpdateTarget } from '@deepseek-ai/dsh-desktop-publisher/desktop-auto-update-environment.mjs'
 
 /**
  * Packaged Linux executable name: the AppRun target, the `.desktop` entry base name, and the binary
